@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { View, TextInput, TouchableOpacity, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/auth-context';
+import { ThemedView } from '@/components/themed-view';
+import { ThemedText } from '@/components/themed-text';
 
 export default function SignupScreen() {
   const router = useRouter();
@@ -34,19 +36,26 @@ export default function SignupScreen() {
       await signUp(email, password);
       router.replace('/(tabs)');
     } catch (err: any) {
-      setError(err.message || 'Signup failed');
+      const errorMsg = err?.message || 'Signup failed';
+      if (errorMsg.includes('Failed to fetch')) {
+        setError('Network error: Cannot reach Supabase. Check your internet connection and ensure Supabase URL is correct.');
+      } else {
+        setError(errorMsg);
+      }
+      console.error('Signup error:', err);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Sign Up</Text>
+    <ThemedView style={styles.container}>
+      <ThemedText style={styles.title}>Sign Up</ThemedText>
 
       <TextInput
         style={styles.input}
         placeholder="Email"
+        placeholderTextColor="#999"
         value={email}
         onChangeText={setEmail}
         editable={!loading}
@@ -57,6 +66,7 @@ export default function SignupScreen() {
       <TextInput
         style={styles.input}
         placeholder="Password"
+        placeholderTextColor="#999"
         value={password}
         onChangeText={setPassword}
         secureTextEntry
@@ -66,13 +76,14 @@ export default function SignupScreen() {
       <TextInput
         style={styles.input}
         placeholder="Confirm Password"
+        placeholderTextColor="#999"
         value={confirmPassword}
         onChangeText={setConfirmPassword}
         secureTextEntry
         editable={!loading}
       />
 
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error ? <ThemedText style={styles.error}>{error}</ThemedText> : null}
 
       <TouchableOpacity
         style={[styles.button, loading && styles.buttonDisabled]}
@@ -82,14 +93,14 @@ export default function SignupScreen() {
         {loading ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.buttonText}>Sign Up</Text>
+          <ThemedText style={styles.buttonText}>Sign Up</ThemedText>
         )}
       </TouchableOpacity>
 
       <TouchableOpacity onPress={() => router.push('/login')} disabled={loading}>
-        <Text style={styles.link}>Already have an account? Login</Text>
+        <ThemedText style={styles.link}>Already have an account? Login</ThemedText>
       </TouchableOpacity>
-    </View>
+    </ThemedView>
   );
 }
 

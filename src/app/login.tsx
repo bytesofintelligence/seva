@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { View, TextInput, TouchableOpacity, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/auth-context';
+import { ThemedView } from '@/components/themed-view';
+import { ThemedText } from '@/components/themed-text';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -23,19 +25,26 @@ export default function LoginScreen() {
       await signIn(email, password);
       router.replace('/(tabs)');
     } catch (err: any) {
-      setError(err.message || 'Login failed');
+      const errorMsg = err?.message || 'Login failed';
+      if (errorMsg.includes('Failed to fetch')) {
+        setError('Network error: Cannot reach Supabase. Check your internet connection and ensure Supabase URL is correct.');
+      } else {
+        setError(errorMsg);
+      }
+      console.error('Login error:', err);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Login</Text>
+    <ThemedView style={styles.container}>
+      <ThemedText style={styles.title}>Login</ThemedText>
 
       <TextInput
         style={styles.input}
         placeholder="Email"
+        placeholderTextColor="#999"
         value={email}
         onChangeText={setEmail}
         editable={!loading}
@@ -46,13 +55,14 @@ export default function LoginScreen() {
       <TextInput
         style={styles.input}
         placeholder="Password"
+        placeholderTextColor="#999"
         value={password}
         onChangeText={setPassword}
         secureTextEntry
         editable={!loading}
       />
 
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error ? <ThemedText style={styles.error}>{error}</ThemedText> : null}
 
       <TouchableOpacity
         style={[styles.button, loading && styles.buttonDisabled]}
@@ -62,14 +72,14 @@ export default function LoginScreen() {
         {loading ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.buttonText}>Login</Text>
+          <ThemedText style={styles.buttonText}>Login</ThemedText>
         )}
       </TouchableOpacity>
 
       <TouchableOpacity onPress={() => router.push('/signup')} disabled={loading}>
-        <Text style={styles.link}>Don't have an account? Sign up</Text>
+        <ThemedText style={styles.link}>Don't have an account? Sign up</ThemedText>
       </TouchableOpacity>
-    </View>
+    </ThemedView>
   );
 }
 

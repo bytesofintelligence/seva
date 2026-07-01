@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   View,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -49,7 +48,13 @@ export default function HomeScreen() {
 
       setOpportunities(data || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch opportunities');
+      const errorMsg = err?.message || 'Failed to fetch opportunities';
+      // Check if it's a "relation does not exist" error
+      if (errorMsg.includes('relation') || errorMsg.includes('does not exist')) {
+        setError('Opportunities table not yet set up in Supabase');
+      } else {
+        setError(errorMsg);
+      }
       console.error('Error fetching opportunities:', err);
     } finally {
       setLoading(false);
