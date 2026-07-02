@@ -41,6 +41,7 @@ export default function EditProfileVolunteerScreen() {
   const [canCollectDeliver, setCanCollectDeliver] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [showSevaId, setShowSevaId] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (!session?.user.id) {
@@ -131,6 +132,65 @@ export default function EditProfileVolunteerScreen() {
     await haptics.medium();
     await signOut();
     router.replace('/login');
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'This will permanently delete your account and all your data. This action cannot be undone.\n\nAll your applications and signups will be automatically withdrawn.',
+      [
+        {
+          text: 'Cancel',
+          onPress: () => {},
+          style: 'cancel',
+        },
+        {
+          text: 'Delete My Account',
+          onPress: confirmDeleteAccount,
+          style: 'destructive',
+        },
+      ]
+    );
+  };
+
+  const confirmDeleteAccount = async () => {
+    try {
+      setIsDeleting(true);
+      await haptics.medium();
+
+      if (!session?.user.id) {
+        Alert.alert('Error', 'Unable to delete account');
+        setIsDeleting(false);
+        return;
+      }
+
+      // Call the RPC function to delete the account completely
+      // This function withdraws all applications, deletes the profile, and deletes the auth user
+      const { data, error: rpcError } = await supabase.rpc('delete_volunteer_account');
+
+      if (rpcError) {
+        throw rpcError;
+      }
+
+      if (data && !data.success) {
+        throw new Error(data.error || 'Failed to delete account');
+      }
+
+      // Sign out and redirect
+      await haptics.success();
+      await signOut();
+      router.replace('/login');
+
+      Alert.alert('Account Deleted', 'Your account and all associated data have been permanently deleted.');
+    } catch (err: any) {
+      console.error('Error deleting account:', err);
+      setIsDeleting(false);
+      await haptics.warning();
+      Alert.alert(
+        'Error',
+        err?.message || 'Failed to delete account. Please try again.'
+      );
+    }
   };
 
   if (loading) {
@@ -401,6 +461,26 @@ export default function EditProfileVolunteerScreen() {
           variant="danger"
           size="lg"
         />
+
+        {/* Delete Account Button - Small text link style */}
+        <View style={{ marginTop: Spacing.lg, paddingTop: Spacing.lg, borderTopWidth: 1, borderTopColor: '#FFE5E5' }}>
+          <TouchableOpacity
+            onPress={handleDeleteAccount}
+            disabled={isDeleting}
+            style={{ paddingVertical: Spacing.md }}
+          >
+            <ThemedText
+              style={{
+                textAlign: 'center',
+                color: '#D85A30',
+                fontSize: 13,
+                fontWeight: '500',
+              }}
+            >
+              {isDeleting ? 'Deleting account...' : 'Delete account'}
+            </ThemedText>
+          </TouchableOpacity>
+        </View>
 
         <View style={{ height: Spacing.xl }} />
       </ScrollView>

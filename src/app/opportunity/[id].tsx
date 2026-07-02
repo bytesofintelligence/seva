@@ -167,8 +167,8 @@ export default function OpportunityDetailScreen() {
 
   const handleApplySuccess = () => {
     setShowApplicationModal(false);
-    // Navigate to applications screen
-    router.push('/(tabs)/applications');
+    // Navigate to schedule screen to see the confirmed opportunity
+    router.push('/(tabs)/schedule');
   };
 
   const formatDate = (dateString: string | null) => {

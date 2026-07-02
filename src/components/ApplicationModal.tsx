@@ -42,6 +42,7 @@ export function ApplicationModal({
   const [requiresAdditionalInfo, setRequiresAdditionalInfo] = useState(false);
   const [additionalInfoPrompt, setAdditionalInfoPrompt] = useState('');
   const [loadingOpportunity, setLoadingOpportunity] = useState(true);
+  const [applicationStatus, setApplicationStatus] = useState<ApplicationStatus | null>(null);
 
   // Fetch opportunity details when modal opens
   useEffect(() => {
@@ -77,6 +78,7 @@ export function ApplicationModal({
       setState('form');
       setError(null);
       setLoadingOpportunity(true);
+      setApplicationStatus(null);
     }
   }, [visible]);
 
@@ -200,6 +202,7 @@ export function ApplicationModal({
         }
       }
 
+      setApplicationStatus(applicationStatus);
       setState('success');
       await haptics.success();
 
@@ -493,7 +496,7 @@ export function ApplicationModal({
                   color: Colors.textPrimary,
                 }}
               >
-                Thank you for offering!
+                {applicationStatus === 'confirmed' ? 'You\'re confirmed!' : 'Thank you for offering!'}
               </ThemedText>
               <ThemedText
                 style={{
@@ -502,7 +505,9 @@ export function ApplicationModal({
                   fontSize: 14,
                 }}
               >
-                The charity will review your offer soon.
+                {applicationStatus === 'confirmed'
+                  ? 'You\'re all set for this opportunity. Check your schedule for details.'
+                  : 'The charity will review your offer soon.'}
               </ThemedText>
             </View>
           )}
