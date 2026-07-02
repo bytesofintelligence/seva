@@ -1,9 +1,19 @@
 import { useState } from 'react';
-import { TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  ScrollView,
+  TouchableOpacity,
+  Platform,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { useAuth } from '@/context/auth-context';
-import { ThemedView } from '@/components/themed-view';
+import { Button, Input, PasswordInput, Card } from '@/components/ui';
 import { ThemedText } from '@/components/themed-text';
+import { Colors, Spacing } from '@/constants/design-tokens';
+import { haptics } from '@/lib/haptics';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -16,21 +26,25 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     if (!email || !password) {
       setError('Please fill in all fields');
+      await haptics.warning();
       return;
     }
 
     setLoading(true);
     setError('');
     try {
+      await haptics.medium();
       await signIn(email, password);
+      await haptics.success();
       router.replace('/(tabs)');
     } catch (err: any) {
       const errorMsg = err?.message || 'Login failed';
       if (errorMsg.includes('Failed to fetch')) {
-        setError('Network error: Cannot reach Supabase. Check your internet connection and ensure Supabase URL is correct.');
+        setError('Network error: Cannot reach Supabase');
       } else {
         setError(errorMsg);
       }
+      await haptics.warning();
       console.error('Login error:', err);
     } finally {
       setLoading(false);
@@ -38,100 +52,117 @@ export default function LoginScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
-      <ThemedText style={styles.title}>Login</ThemedText>
+    <SafeAreaView style={{ flex: 1, backgroundColor: Colors.cardBg }}>
+      {/* Back Button */}
+      <View style={{ paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md }}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <ThemedText style={{ color: Colors.primary, fontSize: 16 }}>
+            ← Back
+          </ThemedText>
+        </TouchableOpacity>
+      </View>
 
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        placeholderTextColor="#999"
-        value={email}
-        onChangeText={setEmail}
-        editable={!loading}
-        autoCapitalize="none"
-        keyboardType="email-address"
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        placeholderTextColor="#999"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        editable={!loading}
-      />
-
-      {error ? <ThemedText style={styles.error}>{error}</ThemedText> : null}
-
-      <TouchableOpacity
-        style={[styles.button, loading && styles.buttonDisabled]}
-        onPress={handleLogin}
-        disabled={loading}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
       >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <ThemedText style={styles.buttonText}>Login</ThemedText>
-        )}
-      </TouchableOpacity>
+        <ScrollView
+          contentContainerStyle={{
+            flexGrow: 1,
+            paddingHorizontal: Spacing.lg,
+            paddingVertical: Spacing.lg,
+            justifyContent: 'center',
+          }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <View style={{ marginBottom: Spacing.xxl, alignItems: 'center' }}>
+            <ThemedText
+              type="h1"
+              style={{
+                marginBottom: Spacing.md,
+                color: Colors.primary,
+              }}
+            >
+              Welcome Back
+            </ThemedText>
+            <ThemedText
+              style={{
+                color: Colors.textSecondary,
+                fontSize: 14,
+                textAlign: 'center',
+              }}
+            >
+              Log in to your SEVA account
+            </ThemedText>
+          </View>
 
-      <TouchableOpacity onPress={() => router.push('/signup')} disabled={loading}>
-        <ThemedText style={styles.link}>Don't have an account? Sign up</ThemedText>
-      </TouchableOpacity>
-    </ThemedView>
+          {/* Form Card */}
+          <Card padding="lg" style={{ marginBottom: Spacing.xl }}>
+            <Input
+              label="Email"
+              placeholder="you@example.com"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              editable={!loading}
+            />
+
+            <PasswordInput
+              label="Password"
+              placeholder="••••••••"
+              value={password}
+              onChangeText={setPassword}
+              editable={!loading}
+            />
+
+            {error && (
+              <View
+                style={{
+                  backgroundColor: Colors.category.coral.text,
+                  padding: Spacing.md,
+                  borderRadius: 8,
+                  marginTop: Spacing.md,
+                }}
+              >
+                <ThemedText style={{ color: Colors.cardBg, fontSize: 13 }}>
+                  {error}
+                </ThemedText>
+              </View>
+            )}
+          </Card>
+
+          {/* Login Button */}
+          <Button
+            label={loading ? 'Logging in...' : 'Log In'}
+            onPress={handleLogin}
+            disabled={loading}
+            variant="primary"
+            size="lg"
+            style={{ marginBottom: Spacing.lg }}
+          />
+
+          {/* Sign Up Link */}
+          <View style={{ alignItems: 'center', gap: Spacing.sm }}>
+            <ThemedText style={{ color: Colors.textSecondary, fontSize: 14 }}>
+              Don't have an account?
+            </ThemedText>
+            <TouchableOpacity onPress={() => router.push('/signup')} disabled={loading}>
+              <ThemedText
+                style={{
+                  color: Colors.primary,
+                  fontSize: 14,
+                  fontWeight: '600',
+                }}
+              >
+                Sign up here
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 20,
-    justifyContent: 'center',
-    backgroundColor: '#f5f5f5',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    textAlign: 'center',
-    color: '#000',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 12,
-    marginBottom: 12,
-    borderRadius: 8,
-    backgroundColor: '#fff',
-    color: '#000',
-    fontSize: 16,
-  },
-  button: {
-    backgroundColor: '#007AFF',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  error: {
-    color: '#ff3b30',
-    marginBottom: 12,
-    textAlign: 'center',
-    fontSize: 14,
-  },
-  link: {
-    color: '#007AFF',
-    textAlign: 'center',
-    marginTop: 16,
-    fontSize: 14,
-  },
-});

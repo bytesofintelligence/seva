@@ -82,6 +82,11 @@ CREATE POLICY profiles_select ON profiles
   TO authenticated
   USING (id = auth.uid());
 
+CREATE POLICY profiles_insert ON profiles
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (id = auth.uid());
+
 CREATE POLICY profiles_update ON profiles
   FOR UPDATE
   TO authenticated

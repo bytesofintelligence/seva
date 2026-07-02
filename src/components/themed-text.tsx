@@ -8,13 +8,32 @@ export type ThemedTextProps = TextProps & {
   themeColor?: ThemeColor;
 };
 
+function getFontFamily(weight: number): string {
+  if (weight >= 600) return 'Inter-SemiBold';
+  if (weight >= 500) return 'Inter-Medium';
+  return 'Inter-Regular';
+}
+
 export function ThemedText({ style, type = 'default', themeColor, ...rest }: ThemedTextProps) {
   const theme = useTheme();
+  const weight = (() => {
+    switch (type) {
+      case 'title':
+      case 'subtitle':
+      case 'smallBold':
+        return 600;
+      case 'default':
+      case 'small':
+        return 500;
+      default:
+        return 400;
+    }
+  })();
 
   return (
     <Text
       style={[
-        { color: theme[themeColor ?? 'text'] },
+        { color: theme[themeColor ?? 'text'], fontFamily: getFontFamily(weight) },
         type === 'default' && styles.default,
         type === 'title' && styles.title,
         type === 'small' && styles.small,
@@ -34,27 +53,22 @@ const styles = StyleSheet.create({
   small: {
     fontSize: 14,
     lineHeight: 20,
-    fontWeight: 500,
   },
   smallBold: {
     fontSize: 14,
     lineHeight: 20,
-    fontWeight: 700,
   },
   default: {
     fontSize: 16,
     lineHeight: 24,
-    fontWeight: 500,
   },
   title: {
     fontSize: 48,
-    fontWeight: 600,
     lineHeight: 52,
   },
   subtitle: {
     fontSize: 32,
     lineHeight: 44,
-    fontWeight: 600,
   },
   link: {
     lineHeight: 30,
@@ -67,7 +81,6 @@ const styles = StyleSheet.create({
   },
   code: {
     fontFamily: Fonts.mono,
-    fontWeight: Platform.select({ android: 700 }) ?? 500,
     fontSize: 12,
   },
 });
