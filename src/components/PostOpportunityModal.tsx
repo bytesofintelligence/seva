@@ -8,6 +8,7 @@ import {
   Platform,
   ActivityIndicator,
   ScrollView,
+  Alert,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
@@ -16,6 +17,7 @@ import { Button, Input, ProgressStep } from '@/components/ui';
 import { Spacing, Colors, BorderRadius } from '@/constants/design-tokens';
 import { supabase } from '@/lib/supabase';
 import { haptics } from '@/lib/haptics';
+import { clearOtherFlagships } from '@/lib/flagship';
 
 interface PostOpportunityModalProps {
   visible: boolean;
@@ -26,6 +28,25 @@ interface PostOpportunityModalProps {
 }
 
 const OPPORTUNITY_TYPES = ['Delivery', 'On-site', 'Remote', 'Hybrid'];
+const DAYS_OF_WEEK = [
+  { value: 0, label: 'Sun' },
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+];
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// Local calendar date, not `d.toISOString().slice(0, 10)` — the picker gives
+// local midnight, and toISOString() converts to UTC first, which rolls back
+// to the previous day in any timezone ahead of UTC (e.g. BST). That mismatch
+// meant an exception date never matched the occurrence_date it was meant to
+// cancel.
+function toLocalDateString(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 export function PostOpportunityModal({
   visible,
@@ -51,6 +72,21 @@ export function PostOpportunityModal({
   const [error, setError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
   const TOTAL_STEPS = 3;
+
+  // Recurring series fields
+  const [repeatEvent, setRepeatEvent] = useState(false);
+  const [recurrenceType, setRecurrenceType] = useState<'weekly' | 'daily'>('weekly');
+  const [recurrenceDayOfWeek, setRecurrenceDayOfWeek] = useState(5); // Friday
+  const [templateTime, setTemplateTime] = useState<Date>(() => {
+    const d = new Date();
+    d.setHours(18, 30, 0, 0);
+    return d;
+  });
+  const [templateDurationMinutes, setTemplateDurationMinutes] = useState('120');
+  const [generateWeeksAhead, setGenerateWeeksAhead] = useState(12);
+  const [showTemplateTimePicker, setShowTemplateTimePicker] = useState(false);
+  const [exceptionDates, setExceptionDates] = useState<Date[]>([]);
+  const [showExceptionDatePicker, setShowExceptionDatePicker] = useState(false);
 
   const handleDateChange = (event: any, selectedDate?: Date) => {
     setShowDatePicker(false);
@@ -78,6 +114,122 @@ export function PostOpportunityModal({
       );
       setStartsAt(newDate);
     }
+  };
+
+  const handleSubmitSingle = async (volunteersNeededNum: number, maxVolunteersNum: number | null) => {
+    if (featured) {
+      await clearOtherFlagships(charityId);
+    }
+
+    // Insert opportunity with charity_id linking to the charity
+    // target_volunteers is the single source of truth for volunteer count
+    const { error: insertError } = await supabase.from('opportunities').insert({
+      charity_id: charityId,
+      title: title.trim(),
+      description: description.trim() || null,
+      type: type!.toLowerCase(),
+      location: location.trim(),
+      starts_at: startsAt.toISOString(),
+      status: 'active',
+      featured,
+      signup_mode: signupMode,
+      target_volunteers: volunteersNeededNum,
+      max_volunteers: maxVolunteersNum,
+      requires_additional_info: requiresAdditionalInfo,
+      additional_info_prompt: requiresAdditionalInfo ? additionalInfoPrompt.trim() || null : null,
+    });
+
+    if (insertError) {
+      throw insertError;
+    }
+  };
+
+  const handleSubmitSeries = async (volunteersNeededNum: number, maxVolunteersNum: number | null): Promise<string> => {
+    const templateTimeString = `${String(templateTime.getHours()).padStart(2, '0')}:${String(
+      templateTime.getMinutes()
+    ).padStart(2, '0')}:00`;
+
+    const template = {
+      title: title.trim(),
+      description: description.trim() || null,
+      location: location.trim(),
+      type: type!.toLowerCase(),
+      latitude: null,
+      longitude: null,
+      target_volunteers: volunteersNeededNum,
+      max_volunteers: maxVolunteersNum,
+      signup_mode: signupMode,
+      featured,
+    };
+
+    const exceptionDateStrings = exceptionDates.map(toLocalDateString);
+
+    if (featured) {
+      await clearOtherFlagships(charityId);
+    }
+
+    const { data: series, error: seriesError } = await supabase
+      .from('opportunity_series')
+      .insert({
+        charity_id: charityId,
+        title: title.trim(),
+        recurrence_type: recurrenceType,
+        recurrence_day_of_week: recurrenceDayOfWeek,
+        template_time: templateTimeString,
+        template_duration_minutes: parseInt(templateDurationMinutes, 10),
+        generate_weeks_ahead: generateWeeksAhead,
+        exception_dates: exceptionDateStrings,
+        template,
+      })
+      .select()
+      .single();
+
+    if (seriesError) throw seriesError;
+
+    const today = new Date();
+    const fromDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+      today.getDate()
+    ).padStart(2, '0')}`;
+
+    const { data: insertedCount, error: rpcError } = await supabase.rpc('generate_series_occurrences', {
+      p_series_id: series.id,
+      p_from_date: fromDate,
+      p_weeks: generateWeeksAhead,
+    });
+
+    if (rpcError) throw rpcError;
+
+    // Cancel any generated occurrence that lands on an exception date so it
+    // never appears to volunteers.
+    if (exceptionDateStrings.length > 0) {
+      const { error: cancelError } = await supabase
+        .from('opportunities')
+        .update({ status: 'cancelled' })
+        .eq('series_id', series.id)
+        .in('occurrence_date', exceptionDateStrings);
+
+      if (cancelError) throw cancelError;
+    }
+
+    // Fetch the last generated occurrence date for the success message.
+    const { data: lastOccurrence } = await supabase
+      .from('opportunities')
+      .select('occurrence_date')
+      .eq('series_id', series.id)
+      .order('occurrence_date', { ascending: false })
+      .limit(1)
+      .single();
+
+    // Parse the DATE-only string at local midnight, not `new Date(dateOnlyString)`
+    // (which reads as UTC midnight and can render as the previous day).
+    const endDateLabel = lastOccurrence?.occurrence_date
+      ? new Date(`${lastOccurrence.occurrence_date}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+      : '';
+    const cadenceLabel = recurrenceType === 'weekly' ? `every ${DAY_NAMES[recurrenceDayOfWeek]}` : 'every day';
+
+    return `${insertedCount ?? 0} occurrences created — ${cadenceLabel} through ${endDateLabel}. ${exceptionDateStrings.length} date${
+      exceptionDateStrings.length === 1 ? '' : 's'
+    } marked as exceptions.`;
   };
 
   const handleSubmit = async () => {
@@ -108,43 +260,51 @@ export function PostOpportunityModal({
       return;
     }
 
+    // Parse optional max_volunteers
+    const maxVolunteersNum = maxVolunteers.trim() ? parseInt(maxVolunteers, 10) : null;
+    if (maxVolunteersNum !== null && (isNaN(maxVolunteersNum) || maxVolunteersNum < 1)) {
+      setError('Max volunteers must be at least 1');
+      return;
+    }
+
+    // Validate that max_volunteers >= target_volunteers
+    if (maxVolunteersNum !== null && maxVolunteersNum < volunteersNeededNum) {
+      setError(`Max volunteers (${maxVolunteersNum}) must be at least the target volunteers (${volunteersNeededNum})`);
+      return;
+    }
+
+    if (repeatEvent) {
+      if (generateWeeksAhead < 1 || generateWeeksAhead > 52) {
+        setError('Weeks ahead must be between 1 and 52');
+        return;
+      }
+      const durationNum = parseInt(templateDurationMinutes, 10);
+      if (isNaN(durationNum) || durationNum < 1) {
+        setError('Duration must be at least 1 minute');
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
 
     try {
       await haptics.medium();
 
-      // Parse optional max_volunteers
-      const maxVolunteersNum = maxVolunteers.trim() ? parseInt(maxVolunteers, 10) : null;
-      if (maxVolunteersNum !== null && (isNaN(maxVolunteersNum) || maxVolunteersNum < 1)) {
-        setError('Max volunteers must be at least 1');
-        return;
-      }
-
-      // Insert opportunity with charity_id linking to the charity
-      // target_volunteers is the single source of truth for volunteer count
-      const { error: insertError } = await supabase.from('opportunities').insert({
-        charity_id: charityId,
-        title: title.trim(),
-        description: description.trim() || null,
-        type: type.toLowerCase(),
-        location: location.trim(),
-        starts_at: startsAt.toISOString(),
-        status: 'active',
-        featured,
-        signup_mode: signupMode,
-        target_volunteers: volunteersNeededNum,
-        max_volunteers: maxVolunteersNum,
-        requires_additional_info: requiresAdditionalInfo,
-        additional_info_prompt: requiresAdditionalInfo ? additionalInfoPrompt.trim() || null : null,
-      });
-
-      if (insertError) {
-        throw insertError;
+      let successMessage: string | null = null;
+      if (repeatEvent) {
+        successMessage = await handleSubmitSeries(volunteersNeededNum, maxVolunteersNum);
+      } else {
+        await handleSubmitSingle(volunteersNeededNum, maxVolunteersNum);
       }
 
       await haptics.success();
-      onSuccess();
+
+      if (successMessage) {
+        Alert.alert('Series Created', successMessage, [{ text: 'OK', onPress: onSuccess }]);
+      } else {
+        onSuccess();
+      }
     } catch (err: any) {
       console.error('Error creating opportunity:', err);
       await haptics.warning();
@@ -167,6 +327,15 @@ export function PostOpportunityModal({
     setRequiresAdditionalInfo(false);
     setAdditionalInfoPrompt('');
     setError(null);
+    setRepeatEvent(false);
+    setRecurrenceType('weekly');
+    setRecurrenceDayOfWeek(5);
+    const defaultTime = new Date();
+    defaultTime.setHours(18, 30, 0, 0);
+    setTemplateTime(defaultTime);
+    setTemplateDurationMinutes('120');
+    setGenerateWeeksAhead(12);
+    setExceptionDates([]);
     onClose();
   };
 
@@ -368,52 +537,295 @@ export function PostOpportunityModal({
                 editable={!loading}
               />
 
-              {/* Date */}
+              {/* Date (hidden when repeating; recurrence fields below replace it) */}
+              {!repeatEvent && (
+                <View>
+                  <ThemedText
+                    style={{
+                      color: Colors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: '600',
+                      marginBottom: Spacing.md,
+                    }}
+                  >
+                    Date & Time
+                  </ThemedText>
+                  <View style={{ gap: Spacing.md }}>
+                    <TouchableOpacity
+                      onPress={() => setShowDatePicker(true)}
+                      disabled={loading}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: Colors.border,
+                        borderRadius: BorderRadius.md,
+                        padding: Spacing.md,
+                        backgroundColor: Colors.cardBg,
+                      }}
+                    >
+                      <ThemedText style={{ color: Colors.textPrimary }}>
+                        {formatDate()}
+                      </ThemedText>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => setShowTimePicker(true)}
+                      disabled={loading}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: Colors.border,
+                        borderRadius: BorderRadius.md,
+                        padding: Spacing.md,
+                        backgroundColor: Colors.cardBg,
+                      }}
+                    >
+                      <ThemedText style={{ color: Colors.textPrimary }}>
+                        {formatTime()}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* Repeat this event toggle */}
               <View>
-                <ThemedText
+                <View
                   style={{
-                    color: Colors.textPrimary,
-                    fontSize: 14,
-                    fontWeight: '600',
-                    marginBottom: Spacing.md,
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
                   }}
                 >
-                  Date & Time
-                </ThemedText>
-                <View style={{ gap: Spacing.md }}>
+                  <ThemedText
+                    style={{ color: Colors.textPrimary, fontSize: 14, fontWeight: '600' }}
+                  >
+                    Repeat this event?
+                  </ThemedText>
                   <TouchableOpacity
-                    onPress={() => setShowDatePicker(true)}
+                    onPress={() => setRepeatEvent(!repeatEvent)}
                     disabled={loading}
                     style={{
-                      borderWidth: 1,
+                      paddingHorizontal: Spacing.lg,
+                      paddingVertical: Spacing.sm,
+                      borderRadius: BorderRadius.full,
+                      backgroundColor: repeatEvent ? Colors.primary : Colors.surfaceMuted,
+                      borderWidth: repeatEvent ? 0 : 1,
                       borderColor: Colors.border,
-                      borderRadius: BorderRadius.md,
-                      padding: Spacing.md,
-                      backgroundColor: Colors.cardBg,
                     }}
                   >
-                    <ThemedText style={{ color: Colors.textPrimary }}>
-                      {formatDate()}
-                    </ThemedText>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => setShowTimePicker(true)}
-                    disabled={loading}
-                    style={{
-                      borderWidth: 1,
-                      borderColor: Colors.border,
-                      borderRadius: BorderRadius.md,
-                      padding: Spacing.md,
-                      backgroundColor: Colors.cardBg,
-                    }}
-                  >
-                    <ThemedText style={{ color: Colors.textPrimary }}>
-                      {formatTime()}
+                    <ThemedText
+                      style={{
+                        color: repeatEvent ? Colors.cardBg : Colors.textPrimary,
+                        fontWeight: '600',
+                        fontSize: 13,
+                      }}
+                    >
+                      {repeatEvent ? 'On' : 'Off'}
                     </ThemedText>
                   </TouchableOpacity>
                 </View>
               </View>
+
+              {repeatEvent && (
+                <>
+                  {/* Recurrence Type */}
+                  <View>
+                    <ThemedText
+                      style={{ color: Colors.textPrimary, fontSize: 14, fontWeight: '600', marginBottom: Spacing.md }}
+                    >
+                      Repeats
+                    </ThemedText>
+                    <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+                      {(['weekly', 'daily'] as const).map((rt) => (
+                        <TouchableOpacity
+                          key={rt}
+                          onPress={() => setRecurrenceType(rt)}
+                          disabled={loading}
+                          style={{
+                            flex: 1,
+                            paddingVertical: Spacing.md,
+                            borderRadius: BorderRadius.md,
+                            backgroundColor: recurrenceType === rt ? Colors.primary : Colors.surfaceMuted,
+                            borderWidth: recurrenceType === rt ? 0 : 1,
+                            borderColor: Colors.border,
+                          }}
+                        >
+                          <ThemedText
+                            style={{
+                              color: recurrenceType === rt ? Colors.cardBg : Colors.textPrimary,
+                              fontWeight: '600',
+                              textAlign: 'center',
+                            }}
+                          >
+                            {rt === 'weekly' ? 'Weekly' : 'Daily'}
+                          </ThemedText>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  {/* Day of Week (weekly only) */}
+                  {recurrenceType === 'weekly' && (
+                    <View>
+                      <ThemedText
+                        style={{ color: Colors.textPrimary, fontSize: 14, fontWeight: '600', marginBottom: Spacing.md }}
+                      >
+                        Which Day?
+                      </ThemedText>
+                      <View style={{ flexDirection: 'row', gap: Spacing.xs, flexWrap: 'wrap' }}>
+                        {DAYS_OF_WEEK.map((d) => (
+                          <TouchableOpacity
+                            key={d.value}
+                            onPress={() => setRecurrenceDayOfWeek(d.value)}
+                            disabled={loading}
+                            style={{
+                              paddingHorizontal: Spacing.md,
+                              paddingVertical: Spacing.sm,
+                              borderRadius: BorderRadius.full,
+                              backgroundColor: recurrenceDayOfWeek === d.value ? Colors.primary : Colors.surfaceMuted,
+                              borderWidth: recurrenceDayOfWeek === d.value ? 0 : 1,
+                              borderColor: Colors.border,
+                            }}
+                          >
+                            <ThemedText
+                              style={{
+                                color: recurrenceDayOfWeek === d.value ? Colors.cardBg : Colors.textPrimary,
+                                fontWeight: '600',
+                                fontSize: 13,
+                              }}
+                            >
+                              {d.label}
+                            </ThemedText>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Template Time */}
+                  <View>
+                    <ThemedText
+                      style={{ color: Colors.textPrimary, fontSize: 14, fontWeight: '600', marginBottom: Spacing.md }}
+                    >
+                      Start Time
+                    </ThemedText>
+                    <TouchableOpacity
+                      onPress={() => setShowTemplateTimePicker(true)}
+                      disabled={loading}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: Colors.border,
+                        borderRadius: BorderRadius.md,
+                        padding: Spacing.md,
+                        backgroundColor: Colors.cardBg,
+                      }}
+                    >
+                      <ThemedText style={{ color: Colors.textPrimary }}>
+                        {templateTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Duration */}
+                  <Input
+                    label="Duration (minutes)"
+                    placeholder="e.g., 120"
+                    value={templateDurationMinutes}
+                    onChangeText={setTemplateDurationMinutes}
+                    keyboardType="number-pad"
+                    editable={!loading}
+                  />
+
+                  {/* Generate Weeks Ahead Stepper */}
+                  <View>
+                    <ThemedText
+                      style={{ color: Colors.textPrimary, fontSize: 14, fontWeight: '600', marginBottom: Spacing.md }}
+                    >
+                      Generate How Many Weeks Ahead?
+                    </ThemedText>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.lg }}>
+                      <TouchableOpacity
+                        onPress={() => setGenerateWeeksAhead(Math.max(1, generateWeeksAhead - 1))}
+                        disabled={loading}
+                        style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: BorderRadius.md,
+                          backgroundColor: Colors.surfaceMuted,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <ThemedText style={{ color: Colors.textPrimary, fontSize: 18, fontWeight: '600' }}>−</ThemedText>
+                      </TouchableOpacity>
+                      <ThemedText style={{ color: Colors.textPrimary, fontSize: 18, fontWeight: '600', minWidth: 32, textAlign: 'center' }}>
+                        {generateWeeksAhead}
+                      </ThemedText>
+                      <TouchableOpacity
+                        onPress={() => setGenerateWeeksAhead(Math.min(52, generateWeeksAhead + 1))}
+                        disabled={loading}
+                        style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: BorderRadius.md,
+                          backgroundColor: Colors.surfaceMuted,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <ThemedText style={{ color: Colors.textPrimary, fontSize: 18, fontWeight: '600' }}>+</ThemedText>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Exception Dates */}
+                  <View>
+                    <ThemedText
+                      style={{ color: Colors.textPrimary, fontSize: 14, fontWeight: '600', marginBottom: Spacing.md }}
+                    >
+                      Exception Dates (dates to skip)
+                    </ThemedText>
+                    {exceptionDates.length > 0 && (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.md }}>
+                        {exceptionDates.map((d, idx) => (
+                          <TouchableOpacity
+                            key={`${d.toISOString()}-${idx}`}
+                            onPress={() =>
+                              setExceptionDates(exceptionDates.filter((_, i) => i !== idx))
+                            }
+                            disabled={loading}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: Spacing.xs,
+                              paddingHorizontal: Spacing.md,
+                              paddingVertical: Spacing.sm,
+                              borderRadius: BorderRadius.full,
+                              backgroundColor: Colors.surfaceMuted,
+                            }}
+                          >
+                            <ThemedText style={{ color: Colors.textPrimary, fontSize: 13 }}>
+                              {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ✕
+                            </ThemedText>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                    <TouchableOpacity
+                      onPress={() => setShowExceptionDatePicker(true)}
+                      disabled={loading}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: Colors.border,
+                        borderRadius: BorderRadius.md,
+                        padding: Spacing.md,
+                        backgroundColor: Colors.cardBg,
+                      }}
+                    >
+                      <ThemedText style={{ color: Colors.textSecondary }}>+ Add exception date</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
 
               {/* Volunteers Needed */}
               <Input
@@ -436,6 +848,9 @@ export function PostOpportunityModal({
                   }}
                 >
                   Mark as Flagship Event?
+                </ThemedText>
+                <ThemedText style={{ color: Colors.textSecondary, fontSize: 13, marginBottom: Spacing.md }}>
+                  Your flagship event is pinned to the top of the volunteer app and stays visible even once full. Only one event can be flagship — marking this one will un-flag whichever event currently holds that spot.
                 </ThemedText>
                 <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
                   <TouchableOpacity
@@ -718,6 +1133,38 @@ export function PostOpportunityModal({
           mode="time"
           display="default"
           onChange={handleTimeChange}
+        />
+      )}
+
+      {/* Template Time Picker (series) */}
+      {showTemplateTimePicker && (
+        <DateTimePicker
+          value={templateTime}
+          mode="time"
+          display="default"
+          onChange={(event, selectedTime) => {
+            setShowTemplateTimePicker(false);
+            if (selectedTime) {
+              const d = new Date();
+              d.setHours(selectedTime.getHours(), selectedTime.getMinutes(), 0, 0);
+              setTemplateTime(d);
+            }
+          }}
+        />
+      )}
+
+      {/* Exception Date Picker (series) */}
+      {showExceptionDatePicker && (
+        <DateTimePicker
+          value={new Date()}
+          mode="date"
+          display="default"
+          onChange={(event, selectedDate) => {
+            setShowExceptionDatePicker(false);
+            if (selectedDate) {
+              setExceptionDates([...exceptionDates, selectedDate]);
+            }
+          }}
         />
       )}
     </Modal>

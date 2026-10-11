@@ -1,133 +1,100 @@
-import { useEffect, useState } from 'react';
-import { DarkTheme, DefaultTheme, ThemeProvider, Stack, useRouter } from 'expo-router';
-import { useColorScheme } from 'react-native';
-import { View, ActivityIndicator } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { DarkTheme, DefaultTheme, ThemeProvider, Stack, useRouter, useSegments } from 'expo-router';
+import { ActivityIndicator, useColorScheme, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { AuthProvider, useAuth } from '@/context/auth-context';
 import { loadFonts } from '@/lib/fonts';
 import { supabase } from '@/lib/supabase';
+import { logAuthError } from '@/lib/auth-errors';
 
 SplashScreen.preventAutoHideAsync();
+
+/**
+ * Routes reachable without a session. Everything else is behind the guard
+ * below, so a deep link straight to e.g. /volunteer-directory bounces a
+ * signed-out user to the landing screen rather than rendering the screen.
+ */
+const PUBLIC_SEGMENTS = new Set([
+  'landing',
+  'login',
+  'signup',
+  'forgot-password',
+  'verify-email',
+  'reset-password',
+  'auth', // /auth/callback
+]);
+
+/**
+ * Routes that are part of completing an auth flow. The guard never redirects
+ * away from these — a password-recovery or verification deep link must be
+ * allowed to finish even though the session state looks unusual mid-flow.
+ */
+const AUTH_FLOW_SEGMENTS = new Set(['auth', 'reset-password', 'verify-email']);
 
 function RootLayout() {
   const colorScheme = useColorScheme();
   const router = useRouter();
-  const { session, loading, role, roleLoading } = useAuth();
+  const segments = useSegments();
+  const { session, loading, emailVerified, passwordRecovery, role, roleLoading } = useAuth();
   const [fontsLoaded, setFontsLoaded] = useState(false);
-  const [routeReady, setRouteReady] = useState(false);
 
-  const checkVolunteerOnboarding = async () => {
-    try {
-      if (!session?.user.id) {
-        router.replace('/login');
-        setRouteReady(true);
-        return;
-      }
+  // The onboarding lookup hits the network; run it once per signed-in user
+  // rather than on every auth event (token refresh fires this effect too).
+  const onboardingCheckedForRef = useRef<string | null>(null);
 
-      // Check if this is a brand new account (created in the last 60 seconds)
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('created_at')
-        .eq('id', session.user.id)
-        .single();
+  const routeSignedInUser = useCallback(
+    async (userId: string, userRole: 'volunteer' | 'charity') => {
+      try {
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('created_at')
+          .eq('id', userId)
+          .single();
 
-      if (profileError) {
-        // Error checking, go to onboarding to be safe
-        router.replace('/onboarding-profile-volunteer');
-        setRouteReady(true);
-        return;
-      }
+        const onboardingRoute =
+          userRole === 'charity' ? '/onboarding-profile-charity' : '/onboarding-profile-volunteer';
 
-      // If profile was just created (within 60 seconds), show onboarding
-      if (profile?.created_at) {
-        const createdTime = new Date(profile.created_at).getTime();
-        const now = new Date().getTime();
-        const isNewAccount = (now - createdTime) < 60000; // 60 seconds
-
-        if (isNewAccount) {
-          router.replace('/onboarding-profile-volunteer');
-          setRouteReady(true);
+        if (profileError) {
+          // Can't tell whether they've onboarded: send them through it rather
+          // than into a half-configured app.
+          router.replace(onboardingRoute);
           return;
         }
-      }
 
-      // Not a new account or already past onboarding window: go to home
-      router.replace('/(tabs)');
-      setRouteReady(true);
-    } catch (err) {
-      console.error('Error checking volunteer onboarding:', err);
-      router.replace('/(tabs)');
-      setRouteReady(true);
-    }
-  };
+        if (profile?.created_at) {
+          const isNewAccount = Date.now() - new Date(profile.created_at).getTime() < 60000;
+          if (isNewAccount) {
+            router.replace(onboardingRoute);
+            return;
+          }
+        }
 
-  const checkCharityOnboarding = async () => {
-    try {
-      if (!session?.user.id) {
-        router.replace('/login');
-        setRouteReady(true);
-        return;
-      }
+        if (userRole === 'charity') {
+          const { data: charities, error: charityError } = await supabase
+            .from('charities')
+            .select('id')
+            .eq('owner_id', userId)
+            .limit(1);
 
-      // Check if this is a brand new account (created in the last 60 seconds)
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('created_at')
-        .eq('id', session.user.id)
-        .single();
+          if (!charityError && (!charities || charities.length === 0)) {
+            router.replace('/charity-setup');
+            return;
+          }
 
-      if (profileError) {
-        // Error checking, go to onboarding to be safe
-        router.replace('/onboarding-profile-charity');
-        setRouteReady(true);
-        return;
-      }
-
-      // If profile was just created (within 60 seconds), show onboarding
-      if (profile?.created_at) {
-        const createdTime = new Date(profile.created_at).getTime();
-        const now = new Date().getTime();
-        const isNewAccount = (now - createdTime) < 60000; // 60 seconds
-
-        if (isNewAccount) {
-          router.replace('/onboarding-profile-charity');
-          setRouteReady(true);
+          router.replace('/(tabs)/charity-dashboard');
           return;
         }
+
+        router.replace('/(tabs)');
+      } catch (err) {
+        logAuthError('onboarding-route', err);
+        router.replace('/(tabs)');
       }
-
-      // Not a new account, check if they have a charity set up
-      const { data: charities, error: charityError } = await supabase
-        .from('charities')
-        .select('id')
-        .eq('owner_id', session.user.id)
-        .limit(1);
-
-      if (charityError) {
-        // Error checking, go to charity dashboard
-        router.replace('/(tabs)/charity-dashboard');
-        setRouteReady(true);
-        return;
-      }
-
-      // If no charities, send to setup
-      if (!charities || charities.length === 0) {
-        router.replace('/charity-setup');
-        setRouteReady(true);
-        return;
-      }
-
-      // Has charities: go to charity dashboard
-      router.replace('/(tabs)/charity-dashboard');
-      setRouteReady(true);
-    } catch (err) {
-      console.error('Error checking charity onboarding:', err);
-      router.replace('/(tabs)');
-      setRouteReady(true);
-    }
-  };
+    },
+    [router],
+  );
 
   useEffect(() => {
     const prepareFonts = async () => {
@@ -145,31 +112,63 @@ function RootLayout() {
   }, []);
 
   useEffect(() => {
-    if (!loading && fontsLoaded && !roleLoading) {
-      if (!session) {
-        router.replace('/landing');
-        setRouteReady(true);
-      } else if (role === 'charity') {
-        // Check if this is a new signup or if they need charity setup
-        checkCharityOnboarding();
-      } else if (role === 'volunteer') {
-        // Check if this is a new signup
-        checkVolunteerOnboarding();
-      } else {
-        // Unknown role: go to home (fallback)
-        router.replace('/(tabs)');
-        setRouteReady(true);
-      }
-    }
-  }, [session, loading, fontsLoaded, roleLoading, role]);
+    if (loading || !fontsLoaded) return;
 
-  if (!fontsLoaded || loading || roleLoading || !routeReady) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
+    const current = segments[0] ?? '';
+    const inAuthFlow = AUTH_FLOW_SEGMENTS.has(current);
+    const isPublic = PUBLIC_SEGMENTS.has(current);
+
+    // 1. A recovery session may only be spent on setting a new password.
+    if (passwordRecovery) {
+      if (current !== 'reset-password') router.replace('/reset-password');
+      return;
+    }
+
+    // 2. Signed out — /auth/callback is exempt so a cold-started deep link can
+    //    still establish its session.
+    if (!session) {
+      onboardingCheckedForRef.current = null;
+      if (!isPublic) router.replace('/landing');
+      return;
+    }
+
+    // 3. Signed in but unverified. With "Confirm email" on, Supabase does not
+    //    issue a session at all in this state, so this is a second line of
+    //    defence rather than the only one — and the database gate added in
+    //    migration 025 is the third.
+    if (!emailVerified) {
+      if (!inAuthFlow) router.replace('/verify-email');
+      return;
+    }
+
+    // 4. Signed in and verified. Wait for the role before deciding where to
+    //    land, so a charity coordinator isn't flashed the volunteer tabs.
+    if (roleLoading || !role) return;
+
+    const userId = session.user.id;
+    const alreadyRouted = onboardingCheckedForRef.current === userId;
+
+    if (!alreadyRouted || isPublic) {
+      onboardingCheckedForRef.current = userId;
+      routeSignedInUser(userId, role);
+    }
+  }, [
+    session,
+    loading,
+    fontsLoaded,
+    emailVerified,
+    passwordRecovery,
+    role,
+    roleLoading,
+    segments,
+    router,
+    routeSignedInUser,
+  ]);
+
+  // The Stack must stay mounted while auth resolves — navigating before the
+  // navigator exists is what made the previous spinner-only render fragile.
+  // The overlay covers it instead.
+  const showOverlay = !fontsLoaded || loading;
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
@@ -179,6 +178,22 @@ function RootLayout() {
           headerShown: false,
         }}
       />
+      {showOverlay ? (
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            justifyContent: 'center',
+            alignItems: 'center',
+            backgroundColor: colorScheme === 'dark' ? '#000' : '#fff',
+          }}
+        >
+          <ActivityIndicator size="large" />
+        </View>
+      ) : null}
     </ThemeProvider>
   );
 }

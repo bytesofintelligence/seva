@@ -9,6 +9,7 @@ import { useAuth } from '@/context/auth-context';
 import { haptics } from '@/lib/haptics';
 import { supabase } from '@/lib/supabase';
 import { ApplicationStatus } from '@/types/status';
+import { withRoleGuard } from '@/components/auth/RoleGate';
 
 interface Application {
   id: string;
@@ -40,7 +41,7 @@ interface OpportunityStats {
   signups_count: number;
 }
 
-export default function ApplicationsScreen() {
+function ApplicationsScreen() {
   const router = useRouter();
   const { session } = useAuth();
   const { id: opportunityId } = useLocalSearchParams<{ id: string }>();
@@ -111,7 +112,9 @@ export default function ApplicationsScreen() {
         throw appsError;
       }
 
-      setApplications(appsData || []);
+      // Supabase infers the to-one profiles join as an array without generated
+      // DB types; at runtime it's a single object (see access sites below).
+      setApplications((appsData as unknown as Application[]) || []);
     } catch (err: any) {
       console.error('Error fetching applications:', err);
       setError(err?.message || 'Failed to load applications');
@@ -662,3 +665,7 @@ export default function ApplicationsScreen() {
     </Screen>
   );
 }
+
+// Coordinator-only route. RLS in Postgres is the real boundary; this stops
+// the screen rendering at all for a volunteer who reaches it by deep link.
+export default withRoleGuard(ApplicationsScreen, 'charity');

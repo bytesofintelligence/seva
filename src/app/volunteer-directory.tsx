@@ -7,6 +7,7 @@ import { Screen, Card, Button } from '@/components/ui';
 import { AvatarDisplay } from '@/components/AvatarDisplay';
 import { Spacing, Colors, BorderRadius, Typography, Layout } from '@/constants/design-tokens';
 import { supabase } from '@/lib/supabase';
+import { withRoleGuard } from '@/components/auth/RoleGate';
 
 interface VolunteerProfile {
   id: string;
@@ -20,7 +21,7 @@ interface VolunteerProfile {
   can_collect_and_deliver: boolean;
 }
 
-export default function VolunteerDirectoryScreen() {
+function VolunteerDirectoryScreen() {
   const router = useRouter();
   const [volunteers, setVolunteers] = useState<VolunteerProfile[]>([]);
   const [filteredVolunteers, setFilteredVolunteers] = useState<VolunteerProfile[]>([]);
@@ -268,3 +269,7 @@ export default function VolunteerDirectoryScreen() {
     </Screen>
   );
 }
+
+// Coordinator-only route. RLS in Postgres is the real boundary; this stops
+// the screen rendering at all for a volunteer who reaches it by deep link.
+export default withRoleGuard(VolunteerDirectoryScreen, 'charity');

@@ -23,6 +23,8 @@ interface Application {
     id: string;
     title: string;
     starts_at: string | null;
+    occurrence_date: string | null;
+    status: string;
     charities: {
       name: string;
     } | null;
@@ -79,6 +81,8 @@ export default function ScheduleScreen() {
             id,
             title,
             starts_at,
+            occurrence_date,
+            status,
             charities(name)
           )
         `
@@ -90,7 +94,9 @@ export default function ScheduleScreen() {
         throw supabaseError;
       }
 
-      setAllApplications(data || []);
+      // Supabase infers to-one joins as arrays without generated DB types;
+      // at runtime these are single objects (see access sites below).
+      setAllApplications((data as unknown as Application[]) || []);
     } catch (err: any) {
       console.error('Error fetching applications:', err);
       setError(err?.message || 'Failed to load applications');
@@ -112,12 +118,27 @@ export default function ScheduleScreen() {
 
   // Group applications into Upcoming and Past
   const groupedApplications = useMemo(() => {
-    const upcoming = allApplications.filter((app) =>
-      ACTIVE_STATUSES.includes(app.status)
-    );
-    const past = allApplications.filter((app) =>
-      PAST_STATUSES.includes(app.status)
-    );
+    const now = new Date();
+
+    const upcoming = allApplications.filter((app) => {
+      // Must have active status
+      if (!ACTIVE_STATUSES.includes(app.status)) return false;
+      // And opportunity must have a future start date (or no start date)
+      if (app.opportunities?.starts_at) {
+        return new Date(app.opportunities.starts_at) > now;
+      }
+      return true;
+    });
+
+    const past = allApplications.filter((app) => {
+      // Include if status is in PAST_STATUSES
+      if (PAST_STATUSES.includes(app.status)) return true;
+      // Or if status is active but the opportunity date has passed
+      if (ACTIVE_STATUSES.includes(app.status) && app.opportunities?.starts_at) {
+        return new Date(app.opportunities.starts_at) <= now;
+      }
+      return false;
+    });
 
     const groups: ApplicationGroup[] = [];
 
@@ -237,6 +258,17 @@ export default function ScheduleScreen() {
     }
   };
 
+  const formatOccurrenceDateLabel = (dateString: string) => {
+    // occurrence_date is a plain DATE column (no time component), so no
+    // timezone conversion is needed — it already represents the correct
+    // calendar day for this occurrence.
+    const date = new Date(`${dateString}T00:00:00`);
+    const weekday = date.toLocaleDateString('en-GB', { weekday: 'long' });
+    const day = date.getDate();
+    const month = date.toLocaleDateString('en-GB', { month: 'long' });
+    return `${weekday} ${day} ${month}`;
+  };
+
   const getStatusLabel = (status: string) => {
     return status
       .split('_')
@@ -286,7 +318,9 @@ export default function ScheduleScreen() {
                     marginBottom: Spacing.xs,
                   }}
                 >
-                  {opp.title}
+                  {opp.occurrence_date
+                    ? `${formatOccurrenceDateLabel(opp.occurrence_date)} · ${opp.title}`
+                    : opp.title}
                 </ThemedText>
                 <ThemedText
                   style={{
@@ -307,24 +341,50 @@ export default function ScheduleScreen() {
                 </ThemedText>
               </View>
 
-              {/* Status Badge */}
-              <View
-                style={{
-                  backgroundColor: statusColors?.bg || Colors.surfaceMuted,
-                  paddingHorizontal: Spacing.md,
-                  paddingVertical: Spacing.xs,
-                  borderRadius: BorderRadius.full,
-                }}
-              >
-                <ThemedText
+              {/* Status Badges */}
+              <View style={{ alignItems: 'flex-end', gap: Spacing.xs }}>
+                <View
                   style={{
-                    color: statusColors?.text || Colors.textSecondary,
-                    fontSize: 11,
-                    fontWeight: '600',
+                    backgroundColor: statusColors?.bg || Colors.surfaceMuted,
+                    paddingHorizontal: Spacing.md,
+                    paddingVertical: Spacing.xs,
+                    borderRadius: BorderRadius.full,
                   }}
                 >
-                  {getStatusLabel(item.status)}
-                </ThemedText>
+                  <ThemedText
+                    style={{
+                      color: statusColors?.text || Colors.textSecondary,
+                      fontSize: 11,
+                      fontWeight: '600',
+                    }}
+                  >
+                    {getStatusLabel(item.status)}
+                  </ThemedText>
+                </View>
+
+                {/* Populated by the cascade trigger (trg_cascade_opportunity_cancellation,
+                    023_recurring_series.sql) when a coordinator cancels this occurrence.
+                    A future notifications pass should alert the volunteer when this happens. */}
+                {opp.status === 'cancelled' && (
+                  <View
+                    style={{
+                      backgroundColor: Colors.category.coral.bg,
+                      paddingHorizontal: Spacing.md,
+                      paddingVertical: Spacing.xs,
+                      borderRadius: BorderRadius.full,
+                    }}
+                  >
+                    <ThemedText
+                      style={{
+                        color: Colors.category.coral.text,
+                        fontSize: 11,
+                        fontWeight: '600',
+                      }}
+                    >
+                      Cancelled by organiser
+                    </ThemedText>
+                  </View>
+                )}
               </View>
             </View>
 

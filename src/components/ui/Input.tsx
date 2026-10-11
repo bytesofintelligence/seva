@@ -1,15 +1,23 @@
 import React, { ReactNode } from 'react';
-import { TextInput, View, Text, ViewStyle, TextInputProps } from 'react-native';
+import { TextInput, View, Text, ViewStyle, TextStyle, TextInputProps } from 'react-native';
 import { Search } from 'lucide-react-native';
 import { Colors, BorderRadius, Spacing } from '@/constants/design-tokens';
 
 interface InputProps extends TextInputProps {
   label?: string;
   error?: string;
+  helperText?: string;
   icon?: boolean | ReactNode; // true for search icon, or custom element
   isSearchBar?: boolean; // If true, render as search bar style (for browse page)
+  size?: 'sm' | 'md' | 'lg';
   testID?: string;
 }
+
+const inputFontSizes: Record<'sm' | 'md' | 'lg', number> = {
+  sm: 13,
+  md: 14,
+  lg: 16,
+};
 
 /**
  * Input: Supports both search bars and form inputs
@@ -20,8 +28,10 @@ export function Input({
   label,
   placeholder = 'Search',
   error,
+  helperText,
   icon = false,
   isSearchBar = false,
+  size = 'md',
   testID,
   ...rest
 }: InputProps) {
@@ -36,10 +46,10 @@ export function Input({
       paddingVertical: 9,
     };
 
-    const inputStyle: ViewStyle = {
+    const inputStyle: TextStyle = {
       flex: 1,
       color: Colors.textPrimary,
-      fontSize: 14,
+      fontSize: inputFontSizes[size],
       marginLeft: 8,
     };
 
@@ -82,15 +92,21 @@ export function Input({
     borderColor: error ? Colors.category.coral.text : 'transparent',
   };
 
-  const inputStyle: ViewStyle = {
+  const inputStyle: TextStyle = {
     flex: 1,
     color: Colors.textPrimary,
-    fontSize: 14,
+    fontSize: inputFontSizes[size],
     paddingVertical: Spacing.sm,
   };
 
   const errorStyle = {
     color: Colors.category.coral.text,
+    fontSize: 12,
+    marginTop: Spacing.xs,
+  };
+
+  const helperStyle = {
+    color: Colors.textSecondary,
     fontSize: 12,
     marginTop: Spacing.xs,
   };
@@ -113,6 +129,7 @@ export function Input({
       </View>
 
       {error && <Text style={errorStyle}>{error}</Text>}
+      {helperText && !error && <Text style={helperStyle}>{helperText}</Text>}
     </View>
   );
 }

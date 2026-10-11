@@ -8,6 +8,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Spacing, Colors, BorderRadius, Typography } from '@/constants/design-tokens';
 import { ApplicationModal } from '@/components/ApplicationModal';
 import { LocationCard } from '@/components/LocationCard';
+import { InstagramFeed } from '@/components/InstagramFeed';
 import { useAuth } from '@/context/auth-context';
 import { supabase } from '@/lib/supabase';
 import { ACTIVE_STATUSES } from '@/types/status';
@@ -28,6 +29,7 @@ interface Opportunity {
     id: string;
     name: string;
     description: string | null;
+    instagram_handle?: string | null;
   } | null;
 }
 
@@ -124,7 +126,8 @@ export default function OpportunityDetailScreen() {
           charities(
             id,
             name,
-            description
+            description,
+            instagram_handle
           )
         `
         )
@@ -140,7 +143,9 @@ export default function OpportunityDetailScreen() {
         return;
       }
 
-      setOpportunity(data);
+      // Supabase infers the to-one charities join as an array without generated
+      // DB types; at runtime it's a single object (see access sites below).
+      setOpportunity(data as unknown as Opportunity);
 
       // Fetch volunteer count from the view (source of truth)
       const { data: countData } = await supabase
@@ -202,7 +207,7 @@ export default function OpportunityDetailScreen() {
   // Use volunteers_count from view (source of truth)
   const volunteersCount = volunteerCount?.volunteers_count || 0;
   const targetVolunteers = opportunity?.target_volunteers || 0;
-  const maxVolunteers = opportunity?.max_volunteers;
+  const maxVolunteers = opportunity?.max_volunteers ?? null;
 
   // Determine effective cap: use max_volunteers if set, otherwise use target_volunteers (no overbooking by default)
   const effectiveCap = maxVolunteers !== null ? maxVolunteers : targetVolunteers;
@@ -211,7 +216,23 @@ export default function OpportunityDetailScreen() {
   const spotsLeft = Math.max(0, targetVolunteers - volunteersCount);
 
   // Opportunity is full if at effective capacity
-  const isFull = effectiveCap !== null && volunteersCount >= effectiveCap;
+  const isFull = volunteersCount >= effectiveCap;
+
+  // Fill ratio toward target, used for progress bar + urgency messaging
+  const fillRatio = targetVolunteers > 0 ? Math.min(1, volunteersCount / targetVolunteers) : 0;
+
+  const urgencyMessage =
+    targetVolunteers === 0
+      ? null
+      : volunteersCount === 0
+      ? 'Be the first to sign up!'
+      : fillRatio < 0.34
+      ? "We need your help — only a few people signed up so far"
+      : fillRatio < 0.7
+      ? "Halfway there! Help us get to full capacity"
+      : fillRatio < 1
+      ? 'Almost full — grab a spot before they run out'
+      : null;
 
   // Loading state
   if (loading) {
@@ -436,6 +457,45 @@ export default function OpportunityDetailScreen() {
                   ? 'Opportunity Full'
                   : `${spotsLeft} of ${targetVolunteers} needed`}
               </ThemedText>
+
+              {/* Progress bar toward target */}
+              {targetVolunteers > 0 && (
+                <View
+                  style={{
+                    height: 8,
+                    borderRadius: 4,
+                    backgroundColor: isFull
+                      ? 'rgba(255,255,255,0.3)'
+                      : Colors.cardBg,
+                    marginTop: Spacing.md,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <View
+                    style={{
+                      height: '100%',
+                      width: `${fillRatio * 100}%`,
+                      borderRadius: 4,
+                      backgroundColor: isFull
+                        ? Colors.cardBg
+                        : Colors.primary,
+                    }}
+                  />
+                </View>
+              )}
+
+              {/* Urgency message */}
+              {urgencyMessage && (
+                <ThemedText
+                  style={{
+                    color: isFull ? Colors.cardBg : Colors.textSecondary,
+                    fontSize: 13,
+                    marginTop: Spacing.sm,
+                  }}
+                >
+                  {urgencyMessage}
+                </ThemedText>
+              )}
             </Card>
           </View>
 

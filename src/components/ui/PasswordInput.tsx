@@ -9,6 +9,7 @@ interface PasswordInputProps extends Omit<TextInputProps, 'secureTextEntry'> {
   label?: string;
   placeholder?: string;
   error?: string;
+  helperText?: string;
   size?: 'sm' | 'md' | 'lg';
   testID?: string;
 }
@@ -17,6 +18,7 @@ export function PasswordInput({
   label,
   placeholder = '••••••••',
   error,
+  helperText,
   size = 'md',
   testID,
   ...rest
@@ -28,6 +30,7 @@ export function PasswordInput({
       label={label}
       placeholder={placeholder}
       error={error}
+      helperText={helperText}
       testID={testID}
       secureTextEntry={!isPasswordVisible}
       icon={

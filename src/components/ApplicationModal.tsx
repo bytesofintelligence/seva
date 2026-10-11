@@ -37,12 +37,15 @@ export function ApplicationModal({
   const { session } = useAuth();
   const [additionalInfo, setAdditionalInfo] = useState('');
   const [partySize, setPartySize] = useState(1);
+  const [partySizeInput, setPartySizeInput] = useState('1');
   const [state, setState] = useState<ModalState>('form');
   const [error, setError] = useState<string | null>(null);
   const [requiresAdditionalInfo, setRequiresAdditionalInfo] = useState(false);
   const [additionalInfoPrompt, setAdditionalInfoPrompt] = useState('');
   const [loadingOpportunity, setLoadingOpportunity] = useState(true);
   const [applicationStatus, setApplicationStatus] = useState<ApplicationStatus | null>(null);
+  const [targetVolunteers, setTargetVolunteers] = useState<number | null>(null);
+  const [editingPartySize, setEditingPartySize] = useState(false);
 
   // Fetch opportunity details when modal opens
   useEffect(() => {
@@ -55,7 +58,7 @@ export function ApplicationModal({
     try {
       const { data, error: oppError } = await supabase
         .from('opportunities')
-        .select('requires_additional_info, additional_info_prompt')
+        .select('requires_additional_info, additional_info_prompt, target_volunteers')
         .eq('id', opportunityId)
         .single();
 
@@ -63,6 +66,7 @@ export function ApplicationModal({
 
       setRequiresAdditionalInfo(data?.requires_additional_info || false);
       setAdditionalInfoPrompt(data?.additional_info_prompt || '');
+      setTargetVolunteers(data?.target_volunteers || null);
     } catch (err) {
       console.error('Error fetching opportunity details:', err);
     } finally {
@@ -75,12 +79,42 @@ export function ApplicationModal({
     if (!visible) {
       setAdditionalInfo('');
       setPartySize(1);
+      setPartySizeInput('1');
       setState('form');
       setError(null);
       setLoadingOpportunity(true);
       setApplicationStatus(null);
+      setEditingPartySize(false);
     }
   }, [visible]);
+
+  const handlePartySize = (newSize: number) => {
+    const max = targetVolunteers || 999;
+    if (newSize >= 1 && newSize <= max) {
+      setPartySize(newSize);
+      setPartySizeInput(newSize.toString());
+    }
+  };
+
+  const handlePartySizeInputChange = (text: string) => {
+    setPartySizeInput(text);
+    const num = parseInt(text, 10);
+    if (!isNaN(num) && num >= 1) {
+      const max = targetVolunteers || 999;
+      if (num <= max) {
+        setPartySize(num);
+      }
+    }
+  };
+
+  const finishEditingPartySize = () => {
+    const num = parseInt(partySizeInput, 10);
+    if (isNaN(num) || num < 1) {
+      setPartySizeInput('1');
+      setPartySize(1);
+    }
+    setEditingPartySize(false);
+  };
 
   const handleSubmit = async () => {
     if (!session?.user.id) {
@@ -125,7 +159,7 @@ export function ApplicationModal({
       if (checkError) {
         throw checkError;
       }
-      // Fetch opportunity details (signup_mode, max_volunteers) - already fetched, but fetch again for fresh data
+      // Fetch opportunity details (signup_mode, target_volunteers, max_volunteers) - already fetched, but fetch again for fresh data
       const { data: opportunityData, error: oppError } = await supabase
         .from('opportunities')
         .select('signup_mode, target_volunteers, max_volunteers')
@@ -157,8 +191,9 @@ export function ApplicationModal({
         const newTotal = currentCount + partySize;
 
         if (newTotal > effectiveCap) {
+          const spotsRemaining = Math.max(0, effectiveCap - currentCount);
           setError(
-            `This event is at capacity. ${currentCount} volunteers have signed up (max: ${effectiveCap}).`
+            `Only ${spotsRemaining} spot${spotsRemaining === 1 ? '' : 's'} remaining for this opportunity (you're trying to register ${partySize} people).`
           );
           setState('error');
           return;
@@ -312,7 +347,7 @@ export function ApplicationModal({
                   }}
                 >
                   <TouchableOpacity
-                    onPress={() => setPartySize(Math.max(1, partySize - 1))}
+                    onPress={() => handlePartySize(partySize - 1)}
                     style={{
                       width: 44,
                       height: 44,
@@ -333,20 +368,51 @@ export function ApplicationModal({
                     </ThemedText>
                   </TouchableOpacity>
 
-                  <ThemedText
-                    style={{
-                      color: Colors.textPrimary,
-                      fontSize: 28,
-                      fontWeight: '700',
-                      minWidth: 40,
-                      textAlign: 'center',
-                    }}
-                  >
-                    {partySize}
-                  </ThemedText>
+                  {editingPartySize ? (
+                    <TextInput
+                      style={{
+                        color: Colors.textPrimary,
+                        fontSize: 28,
+                        fontWeight: '700',
+                        minWidth: 80,
+                        textAlign: 'center',
+                        borderWidth: 2,
+                        borderColor: Colors.primary,
+                        borderRadius: BorderRadius.md,
+                        paddingVertical: Spacing.sm,
+                        paddingHorizontal: Spacing.md,
+                        backgroundColor: Colors.cardBg,
+                      }}
+                      value={partySizeInput}
+                      onChangeText={handlePartySizeInputChange}
+                      onBlur={finishEditingPartySize}
+                      keyboardType="number-pad"
+                      autoFocus
+                    />
+                  ) : (
+                    <TouchableOpacity
+                      onPress={() => setEditingPartySize(true)}
+                      style={{
+                        minWidth: 80,
+                        paddingVertical: Spacing.sm,
+                        paddingHorizontal: Spacing.md,
+                      }}
+                    >
+                      <ThemedText
+                        style={{
+                          color: Colors.textPrimary,
+                          fontSize: 28,
+                          fontWeight: '700',
+                          textAlign: 'center',
+                        }}
+                      >
+                        {partySize}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  )}
 
                   <TouchableOpacity
-                    onPress={() => setPartySize(Math.min(20, partySize + 1))}
+                    onPress={() => handlePartySize(partySize + 1)}
                     style={{
                       width: 44,
                       height: 44,
@@ -376,7 +442,9 @@ export function ApplicationModal({
                     textAlign: 'center',
                   }}
                 >
-                  1–20 people
+                  {targetVolunteers
+                    ? `1–${targetVolunteers} people available`
+                    : 'Enter any number of people'}
                 </ThemedText>
               </View>
 
@@ -390,7 +458,7 @@ export function ApplicationModal({
                       marginBottom: Spacing.md,
                     }}
                   >
-                    Tell them about yourself
+                    Tell them about yourself *
                   </ThemedText>
                   {additionalInfoPrompt && (
                     <ThemedText

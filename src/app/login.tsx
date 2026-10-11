@@ -14,6 +14,7 @@ import { Button, Input, PasswordInput, Card } from '@/components/ui';
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Spacing } from '@/constants/design-tokens';
 import { haptics } from '@/lib/haptics';
+import { isValidEmail, logAuthError, toFriendlyAuthError } from '@/lib/auth-errors';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -24,8 +25,17 @@ export default function LoginScreen() {
   const [error, setError] = useState('');
 
   const handleLogin = async () => {
+    // Second guard against a double-tap submitting twice; the button is also
+    // disabled while loading.
+    if (loading) return;
+
     if (!email || !password) {
       setError('Please fill in all fields');
+      await haptics.warning();
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setError('Please enter a valid email address');
       await haptics.warning();
       return;
     }
@@ -36,16 +46,22 @@ export default function LoginScreen() {
       await haptics.medium();
       await signIn(email, password);
       await haptics.success();
-      router.replace('/(tabs)');
-    } catch (err: any) {
-      const errorMsg = err?.message || 'Login failed';
-      if (errorMsg.includes('Failed to fetch')) {
-        setError('Network error: Cannot reach Supabase');
-      } else {
-        setError(errorMsg);
+      // Navigation is owned by the root layout guard, which also decides
+      // between onboarding, charity setup and the tabs. Routing here as well
+      // would race it.
+    } catch (err) {
+      logAuthError('login', err);
+      const friendly = toFriendlyAuthError(err);
+
+      // An unverified account can't get in; send them somewhere they can act.
+      if (friendly.kind === 'email_not_confirmed') {
+        await haptics.warning();
+        router.push({ pathname: '/verify-email', params: { email: email.trim() } });
+        return;
       }
+
+      setError(friendly.message);
       await haptics.warning();
-      console.error('Login error:', err);
     } finally {
       setLoading(false);
     }
@@ -68,99 +84,149 @@ export default function LoginScreen() {
       >
         <ScrollView
           contentContainerStyle={{
-            flexGrow: 1,
             paddingHorizontal: Spacing.lg,
             paddingVertical: Spacing.lg,
-            justifyContent: 'center',
+            paddingBottom: Spacing.xxl * 2,
+            flexGrow: 1,
           }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Header */}
-          <View style={{ marginBottom: Spacing.xxl, alignItems: 'center' }}>
-            <ThemedText
-              type="h1"
+          <View style={{ flex: 1, justifyContent: 'center' }}>
+            {/* Hero Section */}
+            <View
               style={{
-                marginBottom: Spacing.md,
-                color: Colors.primary,
+                marginBottom: Spacing.xl,
+                alignItems: 'center',
+                paddingVertical: Spacing.md,
               }}
             >
-              Welcome Back
-            </ThemedText>
-            <ThemedText
-              style={{
-                color: Colors.textSecondary,
-                fontSize: 14,
-                textAlign: 'center',
-              }}
-            >
-              Log in to your SEVA account
-            </ThemedText>
-          </View>
-
-          {/* Form Card */}
-          <Card padding="lg" style={{ marginBottom: Spacing.xl }}>
-            <Input
-              label="Email"
-              placeholder="you@example.com"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              editable={!loading}
-            />
-
-            <PasswordInput
-              label="Password"
-              placeholder="••••••••"
-              value={password}
-              onChangeText={setPassword}
-              editable={!loading}
-            />
-
-            {error && (
               <View
                 style={{
-                  backgroundColor: Colors.category.coral.text,
-                  padding: Spacing.md,
-                  borderRadius: 8,
-                  marginTop: Spacing.md,
+                  width: 80,
+                  height: 80,
+                  borderRadius: 40,
+                  backgroundColor: Colors.primary,
+                  marginBottom: Spacing.xl,
+                  justifyContent: 'center',
+                  alignItems: 'center',
                 }}
               >
-                <ThemedText style={{ color: Colors.cardBg, fontSize: 13 }}>
-                  {error}
+                <ThemedText
+                  style={{
+                    fontSize: 40,
+                  }}
+                >
+                  🌱
                 </ThemedText>
               </View>
-            )}
-          </Card>
 
-          {/* Login Button */}
-          <Button
-            label={loading ? 'Logging in...' : 'Log In'}
-            onPress={handleLogin}
-            disabled={loading}
-            variant="primary"
-            size="lg"
-            style={{ marginBottom: Spacing.lg }}
-          />
-
-          {/* Sign Up Link */}
-          <View style={{ alignItems: 'center', gap: Spacing.sm }}>
-            <ThemedText style={{ color: Colors.textSecondary, fontSize: 14 }}>
-              Don't have an account?
-            </ThemedText>
-            <TouchableOpacity onPress={() => router.push('/signup')} disabled={loading}>
               <ThemedText
                 style={{
+                  fontSize: 32,
+                  fontWeight: '700',
                   color: Colors.primary,
-                  fontSize: 14,
-                  fontWeight: '600',
+                  marginBottom: Spacing.sm,
+                  textAlign: 'center',
                 }}
               >
-                Sign up here
+                Welcome to SEVA
               </ThemedText>
-            </TouchableOpacity>
-          </View>
+              <ThemedText
+                style={{
+                  color: Colors.textSecondary,
+                  fontSize: 15,
+                  textAlign: 'center',
+                  lineHeight: 22,
+                  maxWidth: 280,
+                }}
+              >
+                Make a meaningful impact by volunteering with charities that matter
+              </ThemedText>
+            </View>
+
+              {/* Form Card */}
+              <Card padding="md" style={{ marginBottom: Spacing.sm }}>
+                <Input
+                  label="Email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  editable={!loading}
+                />
+
+                <PasswordInput
+                  label="Password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChangeText={setPassword}
+                  editable={!loading}
+                />
+
+                {error ? (
+                  <View
+                    style={{
+                      backgroundColor: Colors.category.coral.text,
+                      padding: Spacing.md,
+                      borderRadius: 8,
+                      marginTop: Spacing.md,
+                    }}
+                  >
+                    <ThemedText style={{ color: Colors.cardBg, fontSize: 13 }}>
+                      {error}
+                    </ThemedText>
+                  </View>
+                ) : (
+                  <View style={{ height: Spacing.md + 26 + Spacing.md + 8 }} />
+                )}
+              </Card>
+
+              {/* Forgot Password Link */}
+              <TouchableOpacity
+                onPress={() =>
+                  router.push({ pathname: '/forgot-password', params: { email: email.trim() } })
+                }
+                disabled={loading}
+                style={{ alignSelf: 'flex-end', marginBottom: Spacing.md }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <ThemedText
+                  style={{ color: Colors.primary, fontSize: 14, fontWeight: '600' }}
+                >
+                  Forgot password?
+                </ThemedText>
+              </TouchableOpacity>
+
+              {/* Login Button */}
+              <Button
+                label={loading ? 'Logging in...' : 'Log In'}
+                onPress={handleLogin}
+                disabled={loading}
+                variant="primary"
+                size="lg"
+                style={{ marginBottom: Spacing.md }}
+              />
+
+              {/* Sign Up Link */}
+              <View style={{ alignItems: 'center', gap: Spacing.sm }}>
+                <ThemedText style={{ color: Colors.textSecondary, fontSize: 14 }}>
+                  Don't have an account?
+                </ThemedText>
+                <TouchableOpacity onPress={() => router.push('/signup')} disabled={loading}>
+                  <ThemedText
+                    style={{
+                      color: Colors.primary,
+                      fontSize: 14,
+                      fontWeight: '600',
+                    }}
+                  >
+                    Sign up here
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

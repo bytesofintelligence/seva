@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   Platform,
   View,
-  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,6 +14,13 @@ import { Button, Input, PasswordInput, Card } from '@/components/ui';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing, Colors, BorderRadius } from '@/constants/design-tokens';
 import { haptics } from '@/lib/haptics';
+import {
+  PASSWORD_MIN_LENGTH,
+  isValidEmail,
+  logAuthError,
+  toFriendlyAuthError,
+  validatePassword,
+} from '@/lib/auth-errors';
 
 type UserRole = 'volunteer' | 'charity';
 
@@ -30,6 +36,9 @@ export default function SignupScreen() {
   const [error, setError] = useState('');
 
   const handleSignup = async () => {
+    // Second guard against a double-tap creating two signup requests.
+    if (loading) return;
+
     if (!role) {
       setError('Please select your role');
       await haptics.warning();
@@ -48,14 +57,21 @@ export default function SignupScreen() {
       return;
     }
 
+    if (!isValidEmail(email)) {
+      setError('Please enter a valid email address');
+      await haptics.warning();
+      return;
+    }
+
     if (password !== confirmPassword) {
       setError('Passwords do not match');
       await haptics.warning();
       return;
     }
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+    const passwordCheck = validatePassword(password);
+    if (!passwordCheck.ok) {
+      setError(passwordCheck.message!);
       await haptics.warning();
       return;
     }
@@ -64,30 +80,26 @@ export default function SignupScreen() {
     setError('');
     try {
       await haptics.medium();
-      await signUp(email, password, {
-        data: { role, full_name: fullName },
+      const { needsVerification } = await signUp(email, password, {
+        data: { role, full_name: fullName.trim() },
       });
       await haptics.success();
-      // Don't navigate here - let the _layout handle it
-      // The _layout will detect the new account and route to onboarding
-      // Just show a success message
-      Alert.alert('✓ Account Created', 'Setting up your profile...', [
-        {
-          text: 'OK',
-          onPress: () => {
-            // Let the auth context changes trigger the _layout navigation
-          }
-        }
-      ]);
-    } catch (err: any) {
-      const errorMsg = err?.message || 'Signup failed';
-      if (errorMsg.includes('Failed to fetch')) {
-        setError('Network error: Cannot reach Supabase');
-      } else {
-        setError(errorMsg);
+
+      if (needsVerification) {
+        // Supabase withheld the session pending email confirmation — this is
+        // the expected path with "Confirm email" on. Nothing in the app marks
+        // the account verified; only opening the emailed link can.
+        router.replace({ pathname: '/verify-email', params: { email: email.trim() } });
+        return;
       }
+
+      // "Confirm email" is disabled on the project, so a session was issued
+      // immediately. Let the root layout route onward to onboarding.
+    } catch (err) {
+      logAuthError('signup', err);
+      const friendly = toFriendlyAuthError(err);
+      setError(friendly.message);
       await haptics.warning();
-      console.error('Signup error:', err);
     } finally {
       setLoading(false);
     }
@@ -99,13 +111,15 @@ export default function SignupScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
       >
-        <View
-          style={{
-            flex: 1,
+        <ScrollView
+          contentContainerStyle={{
             paddingHorizontal: Spacing.lg,
             paddingVertical: Spacing.sm,
-            justifyContent: 'space-between',
+            paddingBottom: Spacing.xxl * 2,
+            minHeight: '100%',
           }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
           {/* Back Button */}
           <View>
@@ -215,9 +229,22 @@ export default function SignupScreen() {
 
             {/* Form Card */}
             <Card shadow="md" padding="md" style={{ marginBottom: Spacing.md }}>
+              {role === 'charity' && (
+                <ThemedText
+                  style={{
+                    color: Colors.textSecondary,
+                    fontSize: 12,
+                    marginBottom: Spacing.md,
+                    fontStyle: 'italic',
+                  }}
+                >
+                  Please enter your details as the coordinator managing this charity account.
+                </ThemedText>
+              )}
+
               <Input
-                label="Full Name"
-                placeholder="Jane Doe"
+                label={role === 'charity' ? 'Your Full Name' : 'Full Name'}
+                placeholder={role === 'charity' ? 'John Smith' : 'Jane Doe'}
                 value={fullName}
                 onChangeText={setFullName}
                 autoCapitalize="words"
@@ -240,6 +267,10 @@ export default function SignupScreen() {
                 value={password}
                 onChangeText={setPassword}
                 editable={!loading}
+                autoCapitalize="none"
+                autoComplete="new-password"
+                textContentType="newPassword"
+                helperText={`At least ${PASSWORD_MIN_LENGTH} characters, with letters and numbers`}
               />
 
               <PasswordInput
@@ -250,7 +281,7 @@ export default function SignupScreen() {
                 editable={!loading}
               />
 
-              {error && (
+              {error ? (
                 <View
                   style={{
                     backgroundColor: Colors.category.coral.text,
@@ -263,6 +294,8 @@ export default function SignupScreen() {
                     {error}
                   </ThemedText>
                 </View>
+              ) : (
+                <View style={{ height: Spacing.sm + 18 + Spacing.sm + Spacing.sm }} />
               )}
             </Card>
           </View>
@@ -296,7 +329,7 @@ export default function SignupScreen() {
               </ThemedText>
             </TouchableOpacity>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

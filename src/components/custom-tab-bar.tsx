@@ -8,7 +8,7 @@ interface Tab {
   name: string;
   label: string;
   href: string;
-  icon: React.ComponentType<{ size: number; color: string }>;
+  icon: React.ComponentType<{ size: number; color: string; strokeWidth?: number }>;
 }
 
 interface CustomTabBarProps {
@@ -33,6 +33,10 @@ export default function CustomTabBar({ tabs, bottomInset = 0 }: CustomTabBarProp
       activeTabName = 'schedule';
     } else if (pathname.includes('charity-dashboard')) {
       activeTabName = 'charity-dashboard';
+    } else if (pathname.includes('sponsors')) {
+      activeTabName = 'sponsors';
+    } else if (pathname.includes('donate')) {
+      activeTabName = 'donate';
     }
 
     setActiveTab(activeTabName);
@@ -62,7 +66,7 @@ export default function CustomTabBar({ tabs, bottomInset = 0 }: CustomTabBarProp
                 styles.tabButton,
                 active && [styles.tabButtonActive, { backgroundColor: colors.primary }],
               ]}
-              onPress={() => router.push(tab.href)}
+              onPress={() => router.push(tab.href as never)}
               activeOpacity={0.8}
             >
               <Icon

@@ -1,4 +1,4 @@
-import { View, ViewStyle } from 'react-native';
+import { View, ViewStyle, DimensionValue } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -8,7 +8,7 @@ import Animated, {
 import { Spacing, Colors, BorderRadius } from '@/constants/design-tokens';
 
 interface SkeletonProps {
-  width?: number | string;
+  width?: DimensionValue;
   height: number;
   borderRadius?: number;
   style?: ViewStyle;

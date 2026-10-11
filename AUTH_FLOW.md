@@ -149,10 +149,43 @@ AsyncStorage is React Native's standard persistent storage:
 
 This is the pattern recommended by the official [Supabase Expo quickstart](https://supabase.com/docs/guides/getting-started/quickstarts/react-native).
 
-## Next Steps
+## Email verification, password reset, password change
 
-Now that auth is working:
-1. Verify by running the app (`npm start`)
-2. Try signing up and logging in
-3. Add profile data storage (create a `profiles` table in Supabase)
-4. Add user profile screens to the app
+Added in the authentication hardening pass. See `AUTH_SETUP.md` for the
+dashboard configuration these depend on.
+
+- **Verification is enforced by Supabase, not by the app.** With "Confirm
+  email" on, `signUp()` returns a user but no session, so an unverified account
+  has nothing to act with. `emailVerified` in the context is derived from
+  `session.user.email_confirmed_at` on every render — there is no local flag.
+  Migration `025_auth_hardening.sql` adds a third layer: a database trigger that
+  rejects writes from users whose email is unconfirmed.
+- **Deep links** all land on `/auth/callback` (`src/app/auth/callback.tsx`),
+  which accepts PKCE `code`, `token_hash`, and implicit fragment tokens, and
+  handles expired/invalid/already-used links explicitly.
+- **Password recovery** sets `passwordRecovery` in the auth context, and the
+  root guard pins the session to `/reset-password` until it is finished — a
+  recovery session cannot be used to browse the app. The user is signed out
+  after a successful reset so the new password must be used at least once.
+- **Change password** re-authenticates through `signInWithPassword` before
+  calling `updateUser`, so the current password is checked by Supabase. Nothing
+  is compared locally and no password is ever written to the app database.
+
+## Route protection
+
+`src/app/_layout.tsx` holds the guard. In order: an active password recovery
+pins to `/reset-password`; no session sends non-public routes to `/landing`;
+an unverified session sends to `/verify-email`; otherwise the onboarding router
+decides between onboarding, charity setup and the tabs.
+
+Coordinator-only screens are additionally wrapped in `withRoleGuard(..., 'charity')`
+(`src/components/auth/RoleGate.tsx`). That is a navigation guard, not the
+security boundary — authorization is enforced in Postgres by RLS keyed on
+`charities.owner_id = auth.uid()`. Run `./supabase/tests/run.sh` to verify.
+
+## Session refresh
+
+`autoRefreshToken` is on, and `src/lib/supabase.ts` starts/stops the refresh
+timer on `AppState` changes, per Supabase's React Native guidance. Without the
+AppState handling the timer does not run reliably while backgrounded, and
+returning to the app leaves an expired access token.

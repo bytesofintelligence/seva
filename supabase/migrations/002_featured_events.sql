@@ -12,7 +12,7 @@ ADD COLUMN party_size INT DEFAULT 1,
 ADD CONSTRAINT applications_party_size_check CHECK (party_size >= 1 AND party_size <= 20);
 
 -- Update applications status check constraint to include 'confirmed'
--- First drop the existing constraint (if it exists)
+-- First drop the existing cgonstraint (if it exists)
 ALTER TABLE applications
 DROP CONSTRAINT IF EXISTS applications_status_check;
 

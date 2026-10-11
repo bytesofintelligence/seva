@@ -19,6 +19,13 @@ export const Colors = {
   border: '#E7E5DD', // Hairline borders (1px)
   ringTrack: '#E0DED5', // Unfilled progress ring
 
+  // Semantic colors for status/state
+  semantic: {
+    info: '#0C447C', // Pending, awaiting action
+    success: '#0F6E56', // Approved (same as primary)
+    error: '#993C1D', // Rejected/error state
+  },
+
   // Category pairs: (fill, text, icon variant)
   category: {
     teal: { bg: '#E1F5EE', text: '#0F6E56' }, // Support, positive

@@ -274,7 +274,7 @@ export default function DemoScreen() {
                 style={{
                   width: 60,
                   height: 60,
-                  backgroundColor: Colors.primary.teal,
+                  backgroundColor: Colors.primary,
                   borderRadius: 8,
                 }}
               />
@@ -300,7 +300,7 @@ export default function DemoScreen() {
                 style={{
                   width: 60,
                   height: 60,
-                  backgroundColor: Colors.accent.coral,
+                  backgroundColor: Colors.category.coral.icon,
                   borderRadius: 8,
                 }}
               />
@@ -308,7 +308,7 @@ export default function DemoScreen() {
                 style={{
                   width: 60,
                   height: 60,
-                  backgroundColor: Colors.accent.lightCoral,
+                  backgroundColor: Colors.category.coral.bg,
                   borderRadius: 8,
                   borderWidth: 1,
                   borderColor: Colors.border,

@@ -12,6 +12,7 @@ interface ButtonProps {
   variant?: 'primary' | 'ghost' | 'danger';
   size?: 'sm' | 'md' | 'lg' | 'xl';
   disabled?: boolean;
+  style?: ViewStyle;
   testID?: string;
 }
 
@@ -24,6 +25,7 @@ export function Button({
   variant = 'primary',
   size = 'md',
   disabled = false,
+  style,
   testID,
 }: ButtonProps) {
   const scale = useSharedValue(1);
@@ -116,6 +118,7 @@ export function Button({
         style={[
           baseButtonStyle,
           variantStyles[validVariant].button,
+          style,
         ]}
       >
         <Text style={variantStyles[validVariant].text}>

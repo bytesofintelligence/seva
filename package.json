@@ -9,6 +9,7 @@
     "@react-native-community/datetimepicker": "^9.1.0",
     "@supabase/supabase-js": "^2.108.2",
     "expo": "~56.0.12",
+    "expo-clipboard": "~56.0.4",
     "expo-constants": "~56.0.18",
     "expo-device": "~56.0.4",
     "expo-file-system": "~56.0.8",
@@ -39,6 +40,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "@types/react-native": "^0.72.8",
     "babel-plugin-module-resolver": "^5.0.3",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~56.0.4",

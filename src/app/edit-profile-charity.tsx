@@ -10,6 +10,7 @@ import { Spacing, Colors, BorderRadius } from '@/constants/design-tokens';
 import { useAuth } from '@/context/auth-context';
 import { haptics } from '@/lib/haptics';
 import { supabase } from '@/lib/supabase';
+import { withRoleGuard } from '@/components/auth/RoleGate';
 
 interface CharityProfile {
   id: string;
@@ -24,9 +25,26 @@ interface CharityProfile {
   how_it_works?: string | null;
   key_services?: string | null;
   volunteer_requirements?: string | null;
+  charity_reg_status?: string | null;
+  charity_number?: string | null;
+  charity_country?: string | null;
+  instagram_handle?: string | null;
+  twitter_handle?: string | null;
+  facebook_url?: string | null;
+  bank_account_name?: string | null;
+  bank_sort_code?: string | null;
+  bank_account_number?: string | null;
 }
 
-export default function EditProfileCharityScreen() {
+function formatSortCode(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 6);
+  const parts = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 6)].filter(Boolean);
+  return parts.join('-');
+}
+
+type CharityRegStatus = 'uk-registered' | 'international' | 'not-registered' | null;
+
+function EditProfileCharityScreen() {
   const router = useRouter();
   const { session, signOut } = useAuth();
   const [charity, setCharity] = useState<CharityProfile | null>(null);
@@ -46,6 +64,15 @@ export default function EditProfileCharityScreen() {
   const [keyServices, setKeyServices] = useState('');
   const [volunteerRequirements, setVolunteerRequirements] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [charityRegStatus, setCharityRegStatus] = useState<CharityRegStatus>(null);
+  const [charityNumber, setCharityNumber] = useState('');
+  const [charityCountry, setCharityCountry] = useState('');
+  const [instagramHandle, setInstagramHandle] = useState('');
+  const [twitterHandle, setTwitterHandle] = useState('');
+  const [facebookUrl, setFacebookUrl] = useState('');
+  const [bankAccountName, setBankAccountName] = useState('');
+  const [bankSortCode, setBankSortCode] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
 
   useEffect(() => {
     fetchCharity();
@@ -61,7 +88,7 @@ export default function EditProfileCharityScreen() {
       // Fetch charity owned by this user
       const { data, error: fetchError } = await supabase
         .from('charities')
-        .select('id, name, avatar_url, mission, description, website, contact_email, contact_phone, operating_areas, how_it_works, key_services, volunteer_requirements')
+        .select('id, name, avatar_url, mission, description, website, contact_email, contact_phone, operating_areas, how_it_works, key_services, volunteer_requirements, charity_reg_status, charity_number, charity_country, instagram_handle, twitter_handle, facebook_url, bank_account_name, bank_sort_code, bank_account_number')
         .eq('owner_id', session.user.id)
         .single();
 
@@ -84,6 +111,15 @@ export default function EditProfileCharityScreen() {
       setKeyServices(data.key_services || '');
       setVolunteerRequirements(data.volunteer_requirements || '');
       setAvatarUrl(data.avatar_url);
+      setCharityRegStatus((data.charity_reg_status || null) as CharityRegStatus);
+      setCharityNumber(data.charity_number || '');
+      setCharityCountry(data.charity_country || '');
+      setInstagramHandle(data.instagram_handle || '');
+      setTwitterHandle(data.twitter_handle || '');
+      setFacebookUrl(data.facebook_url || '');
+      setBankAccountName(data.bank_account_name || '');
+      setBankSortCode(data.bank_sort_code || '');
+      setBankAccountNumber(data.bank_account_number || '');
     } catch (err: any) {
       console.error('Error fetching charity:', err);
       setError(err?.message || 'Failed to load charity profile');
@@ -101,6 +137,22 @@ export default function EditProfileCharityScreen() {
     if (!name.trim()) {
       Alert.alert('Required', 'Please enter your organisation name');
       return;
+    }
+
+    const bankFieldsTouched = bankAccountName.trim() || bankSortCode.trim() || bankAccountNumber.trim();
+    if (bankFieldsTouched) {
+      if (!bankAccountName.trim()) {
+        Alert.alert('Bank details incomplete', 'Please enter the account name');
+        return;
+      }
+      if (!/^\d{2}-\d{2}-\d{2}$/.test(bankSortCode)) {
+        Alert.alert('Bank details incomplete', 'Sort code must be 6 digits (formatted as 00-00-00)');
+        return;
+      }
+      if (!/^\d{8}$/.test(bankAccountNumber)) {
+        Alert.alert('Bank details incomplete', 'Account number must be exactly 8 digits');
+        return;
+      }
     }
 
     try {
@@ -121,6 +173,15 @@ export default function EditProfileCharityScreen() {
           how_it_works: howItWorks.trim() || null,
           key_services: keyServices.trim() || null,
           volunteer_requirements: volunteerRequirements.trim() || null,
+          charity_reg_status: charityRegStatus || null,
+          charity_number: (charityRegStatus && charityNumber.trim()) ? charityNumber.trim() : null,
+          charity_country: (charityRegStatus === 'international' && charityCountry.trim()) ? charityCountry.trim() : null,
+          instagram_handle: instagramHandle.trim() || null,
+          twitter_handle: twitterHandle.trim() || null,
+          facebook_url: facebookUrl.trim() || null,
+          bank_account_name: bankAccountName.trim() || null,
+          bank_sort_code: bankSortCode.trim() || null,
+          bank_account_number: bankAccountNumber.trim() || null,
         })
         .eq('id', charity.id)
         .eq('owner_id', session.user.id);
@@ -319,6 +380,168 @@ export default function EditProfileCharityScreen() {
             multiline
             numberOfLines={3}
           />
+
+          {/* Charity Registration Status */}
+          <View>
+            <ThemedText
+              style={{
+                color: Colors.textPrimary,
+                fontSize: 13,
+                fontWeight: '500',
+                marginBottom: Spacing.sm,
+              }}
+            >
+              Are you a registered charity? (optional)
+            </ThemedText>
+            <View style={{ gap: Spacing.xs }}>
+              {(['uk-registered', 'international', 'not-registered'] as const).map((status) => (
+                <TouchableOpacity
+                  key={status}
+                  onPress={() => setCharityRegStatus(status)}
+                  style={{
+                    paddingVertical: Spacing.sm,
+                    paddingHorizontal: Spacing.md,
+                    borderRadius: BorderRadius.md,
+                    backgroundColor:
+                      charityRegStatus === status
+                        ? Colors.primary
+                        : Colors.surfaceMuted,
+                    borderWidth: 1,
+                    borderColor:
+                      charityRegStatus === status
+                        ? Colors.primary
+                        : Colors.border,
+                  }}
+                >
+                  <ThemedText
+                    style={{
+                      color:
+                        charityRegStatus === status
+                          ? Colors.cardBg
+                          : Colors.textPrimary,
+                      fontWeight: charityRegStatus === status ? '600' : '500',
+                      textAlign: 'center',
+                      fontSize: 13,
+                    }}
+                  >
+                    {status === 'uk-registered'
+                      ? 'UK Registered'
+                      : status === 'international'
+                        ? 'International'
+                        : 'Not Registered'}
+                  </ThemedText>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* Charity Number (conditionally shown) */}
+          {charityRegStatus && (
+            <Input
+              label={
+                charityRegStatus === 'uk-registered'
+                  ? 'Charity Number (optional)'
+                  : 'Charity Registration Number (optional)'
+              }
+              placeholder={
+                charityRegStatus === 'uk-registered'
+                  ? 'e.g., 1234567'
+                  : 'e.g., ABC123456'
+              }
+              value={charityNumber}
+              onChangeText={setCharityNumber}
+            />
+          )}
+
+          {/* Country (conditionally shown for international) */}
+          {charityRegStatus === 'international' && (
+            <Input
+              label="Country (optional)"
+              placeholder="e.g., Canada, Australia"
+              value={charityCountry}
+              onChangeText={setCharityCountry}
+            />
+          )}
+
+          {/* Social Media Section */}
+          <View style={{ marginTop: Spacing.lg }}>
+            <ThemedText
+              style={{
+                color: Colors.textSecondary,
+                fontSize: 11,
+                fontWeight: '600',
+                marginBottom: Spacing.md,
+                textTransform: 'uppercase',
+              }}
+            >
+              Social Media (optional)
+            </ThemedText>
+
+            {/* Instagram */}
+            <Input
+              label="Instagram Handle"
+              placeholder="e.g., oxfam (without @)"
+              value={instagramHandle}
+              onChangeText={setInstagramHandle}
+            />
+
+            {/* Twitter */}
+            <Input
+              label="Twitter Handle"
+              placeholder="e.g., oxfam (without @)"
+              value={twitterHandle}
+              onChangeText={setTwitterHandle}
+            />
+
+            {/* Facebook */}
+            <Input
+              label="Facebook URL"
+              placeholder="e.g., https://facebook.com/oxfam"
+              value={facebookUrl}
+              onChangeText={setFacebookUrl}
+              keyboardType="url"
+            />
+          </View>
+
+          {/* Bank Details Section */}
+          <View style={{ marginTop: Spacing.lg }}>
+            <ThemedText
+              style={{
+                color: Colors.textSecondary,
+                fontSize: 11,
+                fontWeight: '600',
+                marginBottom: Spacing.md,
+                textTransform: 'uppercase',
+              }}
+            >
+              Bank details (for sponsorship transfers)
+            </ThemedText>
+
+            <Input
+              label="Account name"
+              placeholder="e.g., Jalaram Kitchen Ltd"
+              value={bankAccountName}
+              onChangeText={setBankAccountName}
+            />
+
+            <Input
+              label="Sort code"
+              placeholder="00-00-00"
+              value={bankSortCode}
+              onChangeText={(text) => setBankSortCode(formatSortCode(text))}
+              keyboardType="number-pad"
+              maxLength={8}
+            />
+
+            <Input
+              label="Account number"
+              placeholder="12345678"
+              value={bankAccountNumber}
+              onChangeText={(text) => setBankAccountNumber(text.replace(/\D/g, '').slice(0, 8))}
+              keyboardType="number-pad"
+              maxLength={8}
+            />
+          </View>
         </View>
 
         {/* Error Message */}
@@ -346,6 +569,14 @@ export default function EditProfileCharityScreen() {
           size="lg"
         />
 
+        {/* Change Password */}
+        <Button
+          label="Change Password"
+          onPress={() => router.push('/change-password')}
+          variant="ghost"
+          size="lg"
+        />
+
         {/* Sign Out Button */}
         <Button
           label="Sign Out"
@@ -359,3 +590,7 @@ export default function EditProfileCharityScreen() {
     </SafeAreaView>
   );
 }
+
+// Coordinator-only route. RLS in Postgres is the real boundary; this stops
+// the screen rendering at all for a volunteer who reaches it by deep link.
+export default withRoleGuard(EditProfileCharityScreen, 'charity');

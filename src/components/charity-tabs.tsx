@@ -1,4 +1,4 @@
-import { BarChart3 } from 'lucide-react-native';
+import { BarChart3, HandCoins } from 'lucide-react-native';
 
 export const CHARITY_TABS = [
   {
@@ -6,5 +6,11 @@ export const CHARITY_TABS = [
     label: 'Dashboard',
     href: '/(tabs)/charity-dashboard',
     icon: BarChart3,
+  },
+  {
+    name: 'sponsors',
+    label: 'Sponsors',
+    href: '/(tabs)/sponsors',
+    icon: HandCoins,
   },
 ];

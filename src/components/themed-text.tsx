@@ -4,7 +4,7 @@ import { Fonts, ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export type ThemedTextProps = TextProps & {
-  type?: 'default' | 'title' | 'small' | 'smallBold' | 'subtitle' | 'link' | 'linkPrimary' | 'code';
+  type?: 'default' | 'title' | 'h1' | 'h2' | 'h3' | 'small' | 'smallBold' | 'subtitle' | 'link' | 'linkPrimary' | 'code';
   themeColor?: ThemeColor;
 };
 
@@ -19,6 +19,9 @@ export function ThemedText({ style, type = 'default', themeColor, ...rest }: The
   const weight = (() => {
     switch (type) {
       case 'title':
+      case 'h1':
+      case 'h2':
+      case 'h3':
       case 'subtitle':
       case 'smallBold':
         return 600;
@@ -36,6 +39,9 @@ export function ThemedText({ style, type = 'default', themeColor, ...rest }: The
         { color: theme[themeColor ?? 'text'], fontFamily: getFontFamily(weight) },
         type === 'default' && styles.default,
         type === 'title' && styles.title,
+        type === 'h1' && styles.h1,
+        type === 'h2' && styles.h2,
+        type === 'h3' && styles.h3,
         type === 'small' && styles.small,
         type === 'smallBold' && styles.smallBold,
         type === 'subtitle' && styles.subtitle,
@@ -65,6 +71,18 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 48,
     lineHeight: 52,
+  },
+  h1: {
+    fontSize: 24,
+    lineHeight: 30,
+  },
+  h2: {
+    fontSize: 20,
+    lineHeight: 26,
+  },
+  h3: {
+    fontSize: 17,
+    lineHeight: 22,
   },
   subtitle: {
     fontSize: 32,

@@ -1,20 +1,21 @@
 import { useEffect, useState } from 'react';
-import { View, ActivityIndicator, ScrollView, TouchableOpacity, Linking } from 'react-native';
+import { View, ScrollView, ActivityIndicator, TouchableOpacity, Linking } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
 
-import { Card, Tag } from '@/components/ui';
+import { Screen, Card } from '@/components/ui';
+import { AvatarDisplay } from '@/components/AvatarDisplay';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing, Colors } from '@/constants/design-tokens';
+import { InstagramFeedWidget } from '@/components/InstagramFeedWidget';
+import { Spacing, Colors, BorderRadius, Typography } from '@/constants/design-tokens';
 import { supabase } from '@/lib/supabase';
 
 interface CharityProfile {
   id: string;
   name: string;
   avatar_url: string | null;
-  mission: string | null;
   description: string | null;
+  mission: string | null;
   website: string | null;
   contact_email: string | null;
   contact_phone: string | null;
@@ -22,6 +23,9 @@ interface CharityProfile {
   how_it_works: string | null;
   key_services: string | null;
   volunteer_requirements: string | null;
+  instagram_handle: string | null;
+  twitter_handle: string | null;
+  facebook_url: string | null;
 }
 
 export default function CharityProfileScreen() {
@@ -30,7 +34,6 @@ export default function CharityProfileScreen() {
   const [charity, setCharity] = useState<CharityProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [resolvedAvatarUrl, setResolvedAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -46,50 +49,12 @@ export default function CharityProfileScreen() {
     try {
       const { data, error: supabaseError } = await supabase
         .from('charities')
-        .select(
-          `
-          id,
-          name,
-          avatar_url,
-          mission,
-          description,
-          website,
-          contact_email,
-          contact_phone,
-          operating_areas,
-          how_it_works,
-          key_services,
-          volunteer_requirements
-        `
-        )
+        .select('*')
         .eq('id', id)
         .single();
 
-      if (supabaseError) {
-        throw supabaseError;
-      }
-
-      if (!data) {
-        setError('Charity not found');
-        return;
-      }
-
+      if (supabaseError) throw supabaseError;
       setCharity(data);
-
-      // Resolve avatar URL if it's a storage path
-      if (data.avatar_url) {
-        if (data.avatar_url.startsWith('http://') || data.avatar_url.startsWith('https://')) {
-          setResolvedAvatarUrl(data.avatar_url);
-        } else {
-          // It's a storage path, get signed URL
-          const { data: signedUrlData } = await supabase.storage
-            .from('avatars')
-            .createSignedUrl(data.avatar_url, 60 * 60);
-          if (signedUrlData?.signedUrl) {
-            setResolvedAvatarUrl(signedUrlData.signedUrl);
-          }
-        }
-      }
     } catch (err: any) {
       console.error('Error fetching charity:', err);
       setError(err?.message || 'Failed to load charity profile');
@@ -98,77 +63,45 @@ export default function CharityProfileScreen() {
     }
   };
 
-  const handleContactEmail = (email: string) => {
-    Linking.openURL(`mailto:${email}`);
-  };
-
-  const handleContactPhone = (phone: string) => {
-    Linking.openURL(`tel:${phone}`);
-  };
-
-  const handleOpenWebsite = (url: string) => {
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      url = 'https://' + url;
+  const openUrl = async (url: string) => {
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
+        await Linking.openURL(url);
+      }
+    } catch (err) {
+      console.error('Error opening URL:', err);
     }
-    Linking.openURL(url);
   };
 
-  // Loading state
   if (loading) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: Colors.cardBg }}>
-        <View
-          style={{
-            flex: 1,
-            justifyContent: 'center',
-            alignItems: 'center',
-          }}
-        >
-          <ActivityIndicator size="large" color={Colors.primary} />
-          <ThemedText style={{ marginTop: Spacing.md, color: Colors.textSecondary }}>
-            Loading charity profile...
-          </ThemedText>
-        </View>
+        <Screen>
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+          </View>
+        </Screen>
       </SafeAreaView>
     );
   }
 
-  // Error state
   if (error || !charity) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: Colors.cardBg }}>
-        <View style={{ flex: 1, padding: Spacing.lg }}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={{ marginBottom: Spacing.lg }}
-          >
-            <ThemedText style={{ color: Colors.primary, fontSize: 16 }}>
+        <Screen padding="lg">
+          <TouchableOpacity onPress={() => router.back()} style={{ marginBottom: Spacing.lg }}>
+            <ThemedText style={{ color: Colors.primary, fontSize: 14 }}>
               ← Back
             </ThemedText>
           </TouchableOpacity>
-
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-            <ThemedText
-              type="h2"
-              style={{
-                marginBottom: Spacing.md,
-                textAlign: 'center',
-                color: Colors.textPrimary,
-              }}
-            >
-              Charity Not Found
-            </ThemedText>
-            <ThemedText
-              style={{
-                textAlign: 'center',
-                color: Colors.textSecondary,
-                marginBottom: Spacing.xl,
-              }}
-            >
-              {error || 'This charity profile may no longer be available.'}
-            </ThemedText>
-          </View>
-        </View>
+          <ThemedText type="h2" style={{ color: Colors.textPrimary }}>
+            Error
+          </ThemedText>
+          <ThemedText style={{ color: Colors.textSecondary, marginTop: Spacing.md }}>
+            {error || 'Charity not found'}
+          </ThemedText>
+        </Screen>
       </SafeAreaView>
     );
   }
@@ -176,304 +109,234 @@ export default function CharityProfileScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: Colors.cardBg }}>
       <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: Spacing.xxl }}
+        contentContainerStyle={{
+          paddingHorizontal: Spacing.lg,
+          paddingVertical: Spacing.lg,
+        }}
       >
-        {/* Header with back button */}
-        <View
+        {/* Back Button */}
+        <TouchableOpacity onPress={() => router.back()} style={{ marginBottom: Spacing.lg }}>
+          <ThemedText style={{ color: Colors.primary, fontSize: 14 }}>
+            ← Back
+          </ThemedText>
+        </TouchableOpacity>
+
+        {/* Avatar */}
+        {charity.avatar_url && (
+          <View style={{ alignItems: 'center', marginBottom: Spacing.xl }}>
+            <AvatarDisplay
+              avatarUrl={charity.avatar_url}
+              fullName={charity.name}
+              size="lg"
+            />
+          </View>
+        )}
+
+        {/* Charity Name */}
+        <ThemedText
+          type="h1"
           style={{
-            paddingHorizontal: Spacing.lg,
-            paddingVertical: Spacing.md,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
+            color: Colors.textPrimary,
+            marginBottom: Spacing.sm,
+            textAlign: 'center',
           }}
         >
-          <TouchableOpacity onPress={() => router.back()}>
-            <ThemedText style={{ color: Colors.primary, fontSize: 16 }}>
-              ← Back
-            </ThemedText>
-          </TouchableOpacity>
-          <ThemedText
-            type="h3"
-            style={{
-              flex: 1,
-              marginLeft: Spacing.md,
-              color: Colors.textPrimary,
-            }}
-          >
-            About
-          </ThemedText>
-        </View>
+          {charity.name}
+        </ThemedText>
 
-        {/* Content */}
-        <View style={{ paddingHorizontal: Spacing.lg, gap: Spacing.xl }}>
-          {/* Avatar */}
-          {resolvedAvatarUrl && (
-            <View
-              style={{
-                width: '100%',
-                height: 200,
-                borderRadius: 16,
-                overflow: 'hidden',
-                backgroundColor: Colors.surfaceMuted,
-              }}
-            >
-              <Image
-                source={{ uri: resolvedAvatarUrl }}
-                style={{ width: '100%', height: '100%' }}
-                contentFit="cover"
-              />
-            </View>
-          )}
-
-          {/* Charity Name */}
-          <View>
-            <ThemedText
-              type="h1"
-              style={{
-                color: Colors.textPrimary,
-              }}
-            >
-              {charity.name}
-            </ThemedText>
-          </View>
-
-          {/* Mission Section */}
-          {charity.mission && (
-            <View>
-              <ThemedText
-                style={{
-                  color: Colors.textSecondary,
-                  fontSize: 12,
-                  marginBottom: Spacing.sm,
-                  fontWeight: '600',
-                }}
-              >
-                OUR MISSION
-              </ThemedText>
-              <Card shadow="sm" padding="lg">
-                <ThemedText
-                  style={{
-                    color: Colors.textPrimary,
-                    fontSize: 16,
-                    lineHeight: 24,
-                  }}
-                >
-                  {charity.mission}
-                </ThemedText>
-              </Card>
-            </View>
-          )}
-
-          {/* Description Section */}
-          {charity.description && (
-            <View>
-              <ThemedText
-                style={{
-                  color: Colors.textSecondary,
-                  fontSize: 12,
-                  marginBottom: Spacing.sm,
-                  fontWeight: '600',
-                }}
-              >
-                ABOUT US
-              </ThemedText>
-              <Card shadow="sm" padding="lg">
-                <ThemedText
-                  style={{
-                    color: Colors.textPrimary,
-                    fontSize: 16,
-                    lineHeight: 24,
-                  }}
-                >
-                  {charity.description}
-                </ThemedText>
-              </Card>
-            </View>
-          )}
-
-          {/* Operating Areas */}
-          {charity.operating_areas && (
-            <View>
-              <ThemedText
-                style={{
-                  color: Colors.textSecondary,
-                  fontSize: 12,
-                  marginBottom: Spacing.sm,
-                  fontWeight: '600',
-                }}
-              >
-                OPERATING AREAS
-              </ThemedText>
-              <Card shadow="sm" padding="lg">
-                <ThemedText
-                  style={{
-                    color: Colors.textPrimary,
-                    fontSize: 16,
-                    lineHeight: 24,
-                  }}
-                >
-                  {charity.operating_areas}
-                </ThemedText>
-              </Card>
-            </View>
-          )}
-
-          {/* How It Works */}
-          {charity.how_it_works && (
-            <View>
-              <ThemedText
-                style={{
-                  color: Colors.textSecondary,
-                  fontSize: 12,
-                  marginBottom: Spacing.sm,
-                  fontWeight: '600',
-                }}
-              >
-                HOW WE WORK
-              </ThemedText>
-              <Card shadow="sm" padding="lg">
-                <ThemedText
-                  style={{
-                    color: Colors.textPrimary,
-                    fontSize: 16,
-                    lineHeight: 24,
-                  }}
-                >
-                  {charity.how_it_works}
-                </ThemedText>
-              </Card>
-            </View>
-          )}
-
-          {/* Key Services */}
-          {charity.key_services && (
-            <View>
-              <ThemedText
-                style={{
-                  color: Colors.textSecondary,
-                  fontSize: 12,
-                  marginBottom: Spacing.sm,
-                  fontWeight: '600',
-                }}
-              >
-                KEY SERVICES
-              </ThemedText>
-              <Card shadow="sm" padding="lg">
-                <ThemedText
-                  style={{
-                    color: Colors.textPrimary,
-                    fontSize: 16,
-                    lineHeight: 24,
-                  }}
-                >
-                  {charity.key_services}
-                </ThemedText>
-              </Card>
-            </View>
-          )}
-
-          {/* Volunteer Requirements */}
-          {charity.volunteer_requirements && (
-            <View>
-              <ThemedText
-                style={{
-                  color: Colors.textSecondary,
-                  fontSize: 12,
-                  marginBottom: Spacing.sm,
-                  fontWeight: '600',
-                }}
-              >
-                VOLUNTEER REQUIREMENTS
-              </ThemedText>
-              <Card shadow="sm" padding="lg">
-                <ThemedText
-                  style={{
-                    color: Colors.textPrimary,
-                    fontSize: 16,
-                    lineHeight: 24,
-                  }}
-                >
-                  {charity.volunteer_requirements}
-                </ThemedText>
-              </Card>
-            </View>
-          )}
-
-          {/* Contact Section */}
-          <View>
+        {/* Description */}
+        {charity.description && (
+          <Card padding="lg" style={{ marginBottom: Spacing.lg }}>
             <ThemedText
               style={{
                 color: Colors.textSecondary,
-                fontSize: 12,
-                marginBottom: Spacing.md,
-                fontWeight: '600',
+                lineHeight: 20,
               }}
             >
-              GET IN TOUCH
+              {charity.description}
             </ThemedText>
+          </Card>
+        )}
 
-            <View style={{ gap: Spacing.md }}>
-              {charity.website && (
-                <TouchableOpacity
-                  onPress={() => handleOpenWebsite(charity.website!)}
-                  activeOpacity={0.7}
-                >
-                  <Card shadow="sm" padding="lg">
-                    <ThemedText
-                      style={{
-                        color: Colors.primary,
-                        fontSize: 16,
-                        fontWeight: '500',
-                      }}
-                    >
-                      🌐 Visit Website
-                    </ThemedText>
-                  </Card>
-                </TouchableOpacity>
-              )}
+        {/* Mission */}
+        {charity.mission && (
+          <Card padding="lg" style={{ marginBottom: Spacing.lg }}>
+            <ThemedText
+              style={{
+                color: Colors.textSecondary,
+                fontSize: 11,
+                marginBottom: Spacing.sm,
+                fontWeight: '600',
+                textTransform: 'uppercase',
+              }}
+            >
+              Mission
+            </ThemedText>
+            <ThemedText
+              style={{
+                color: Colors.textPrimary,
+                lineHeight: 20,
+              }}
+            >
+              {charity.mission}
+            </ThemedText>
+          </Card>
+        )}
 
-              {charity.contact_email && (
-                <TouchableOpacity
-                  onPress={() => handleContactEmail(charity.contact_email!)}
-                  activeOpacity={0.7}
-                >
-                  <Card shadow="sm" padding="lg">
-                    <ThemedText
-                      style={{
-                        color: Colors.primary,
-                        fontSize: 16,
-                        fontWeight: '500',
-                      }}
-                    >
-                      ✉️ {charity.contact_email}
-                    </ThemedText>
-                  </Card>
-                </TouchableOpacity>
-              )}
+        {/* How It Works */}
+        {charity.how_it_works && (
+          <Card padding="lg" style={{ marginBottom: Spacing.lg }}>
+            <ThemedText
+              style={{
+                color: Colors.textSecondary,
+                fontSize: 11,
+                marginBottom: Spacing.sm,
+                fontWeight: '600',
+                textTransform: 'uppercase',
+              }}
+            >
+              How It Works
+            </ThemedText>
+            <ThemedText
+              style={{
+                color: Colors.textPrimary,
+                lineHeight: 20,
+              }}
+            >
+              {charity.how_it_works}
+            </ThemedText>
+          </Card>
+        )}
 
-              {charity.contact_phone && (
-                <TouchableOpacity
-                  onPress={() => handleContactPhone(charity.contact_phone!)}
-                  activeOpacity={0.7}
-                >
-                  <Card shadow="sm" padding="lg">
-                    <ThemedText
-                      style={{
-                        color: Colors.primary,
-                        fontSize: 16,
-                        fontWeight: '500',
-                      }}
-                    >
-                      📞 {charity.contact_phone}
-                    </ThemedText>
-                  </Card>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-        </View>
+        {/* Key Services */}
+        {charity.key_services && (
+          <Card padding="lg" style={{ marginBottom: Spacing.lg }}>
+            <ThemedText
+              style={{
+                color: Colors.textSecondary,
+                fontSize: 11,
+                marginBottom: Spacing.sm,
+                fontWeight: '600',
+                textTransform: 'uppercase',
+              }}
+            >
+              Key Services
+            </ThemedText>
+            <ThemedText
+              style={{
+                color: Colors.textPrimary,
+                lineHeight: 20,
+              }}
+            >
+              {charity.key_services}
+            </ThemedText>
+          </Card>
+        )}
+
+        {/* Operating Areas */}
+        {charity.operating_areas && (
+          <Card padding="lg" style={{ marginBottom: Spacing.lg }}>
+            <ThemedText
+              style={{
+                color: Colors.textSecondary,
+                fontSize: 11,
+                marginBottom: Spacing.sm,
+                fontWeight: '600',
+                textTransform: 'uppercase',
+              }}
+            >
+              Where We Operate
+            </ThemedText>
+            <ThemedText
+              style={{
+                color: Colors.textPrimary,
+                lineHeight: 20,
+              }}
+            >
+              {charity.operating_areas}
+            </ThemedText>
+          </Card>
+        )}
+
+        {/* Volunteer Requirements */}
+        {charity.volunteer_requirements && (
+          <Card padding="lg" style={{ marginBottom: Spacing.lg }}>
+            <ThemedText
+              style={{
+                color: Colors.textSecondary,
+                fontSize: 11,
+                marginBottom: Spacing.sm,
+                fontWeight: '600',
+                textTransform: 'uppercase',
+              }}
+            >
+              Volunteer Requirements
+            </ThemedText>
+            <ThemedText
+              style={{
+                color: Colors.textPrimary,
+                lineHeight: 20,
+              }}
+            >
+              {charity.volunteer_requirements}
+            </ThemedText>
+          </Card>
+        )}
+
+        {/* Contact Information */}
+        <Card padding="lg" style={{ marginBottom: Spacing.lg }}>
+          <ThemedText
+            style={{
+              color: Colors.textSecondary,
+              fontSize: 11,
+              marginBottom: Spacing.md,
+              fontWeight: '600',
+              textTransform: 'uppercase',
+            }}
+          >
+            Contact
+          </ThemedText>
+
+          {charity.website && (
+            <TouchableOpacity
+              onPress={() => openUrl(charity.website!)}
+              style={{ marginBottom: Spacing.md }}
+            >
+              <ThemedText style={{ color: Colors.primary, textDecorationLine: 'underline' }}>
+                🌐 {charity.website}
+              </ThemedText>
+            </TouchableOpacity>
+          )}
+
+          {charity.contact_email && (
+            <TouchableOpacity
+              onPress={() => openUrl(`mailto:${charity.contact_email}`)}
+              style={{ marginBottom: Spacing.md }}
+            >
+              <ThemedText style={{ color: Colors.primary, textDecorationLine: 'underline' }}>
+                ✉️ {charity.contact_email}
+              </ThemedText>
+            </TouchableOpacity>
+          )}
+
+          {charity.contact_phone && (
+            <TouchableOpacity onPress={() => openUrl(`tel:${charity.contact_phone}`)}>
+              <ThemedText style={{ color: Colors.primary, textDecorationLine: 'underline' }}>
+                📞 {charity.contact_phone}
+              </ThemedText>
+            </TouchableOpacity>
+          )}
+        </Card>
+
+        {/* Instagram Feed */}
+        {charity.instagram_handle && (
+          <InstagramFeedWidget
+            instagramHandle={charity.instagram_handle}
+            charityName={charity.name}
+          />
+        )}
+
+        <View style={{ height: Spacing.xl }} />
       </ScrollView>
     </SafeAreaView>
   );

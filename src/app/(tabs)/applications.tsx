@@ -70,7 +70,9 @@ export default function ApplicationsScreen() {
         throw supabaseError;
       }
 
-      setApplications(data || []);
+      // Supabase infers to-one joins as arrays without generated DB types;
+      // at runtime these are single objects (see access sites below).
+      setApplications((data as unknown as Application[]) || []);
     } catch (err: any) {
       console.error('Error fetching applications:', err);
       setError(err?.message || 'Failed to load applications');

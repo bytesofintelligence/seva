@@ -454,6 +454,14 @@ export default function EditProfileVolunteerScreen() {
           size="lg"
         />
 
+        {/* Change Password */}
+        <Button
+          label="Change Password"
+          onPress={() => router.push('/change-password')}
+          variant="ghost"
+          size="lg"
+        />
+
         {/* Sign Out Button */}
         <Button
           label="Sign Out"

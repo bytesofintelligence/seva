@@ -1,10 +1,11 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, ScrollView, TouchableOpacity, View, Text } from "react-native";
-import { Clock, MapPin } from "lucide-react-native";
+import { Clock, MapPin, Repeat2 } from "lucide-react-native";
 
 import { AvatarDisplay } from "@/components/AvatarDisplay";
 import { Button, Card, Input, Screen, Tag } from "@/components/ui";
+import { DateSelectionSheet } from "@/components/DateSelectionSheet";
 import { Colors, Spacing, Typography, BorderRadius, Layout } from "@/constants/design-tokens";
 import { useAuth } from "@/context/auth-context";
 import { supabase } from "@/lib/supabase";
@@ -19,6 +20,7 @@ interface Opportunity {
   target_volunteers: number | null;
   max_volunteers: number | null;
   starts_at: string | null;
+  series_id: string | null;
   charities: {
     name: string;
   } | null;
@@ -63,6 +65,8 @@ export default function HomeScreen() {
   const [userApplications, setUserApplications] = useState<
     Map<string, { status: string }>
   >(new Map());
+  const [seriesRecurrence, setSeriesRecurrence] = useState<Map<string, 'weekly' | 'daily'>>(new Map());
+  const [dateSheetSeries, setDateSheetSeries] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
     fetchOpportunities();
@@ -120,6 +124,7 @@ export default function HomeScreen() {
           target_volunteers,
           max_volunteers,
           starts_at,
+          series_id,
           charities(name)
         `,
         )
@@ -157,8 +162,15 @@ export default function HomeScreen() {
         // Filter opportunities: show if no application OR if cancelled (withdrawn - they can re-apply)
         // Hide if: rejected, confirmed, approved, in_progress, or completed
         // Also hide opportunities that are at max capacity (except featured events which always show)
+        // Also exclude opportunities with past dates (starts_at is in the past)
+        const now = new Date();
         const enrichedData = data
           .filter((opp) => {
+            // Exclude opportunities with past start dates
+            if (opp.starts_at && new Date(opp.starts_at) <= now) {
+              return false;
+            }
+
             const app = applicationsMap.get(opp.id);
             const volunteerCount = countMap.get(opp.id)?.volunteers_count || 0;
 
@@ -183,10 +195,65 @@ export default function HomeScreen() {
             opportunity_volunteer_counts: countMap.get(opp.id),
           }));
 
+        // Deduplicate by series (client-side): a series can have a dozen
+        // generated occurrence rows, all `status = 'active'` and all in the
+        // future, so without this step the same recurring event would
+        // render one card per week. We keep every standalone opportunity
+        // (series_id null) as-is, and for each series keep only the single
+        // occurrence with the smallest starts_at — the next upcoming one.
+        // This is the client-side equivalent of `DISTINCT ON (series_id)
+        // ORDER BY series_id, starts_at ASC`; we do it in JS rather than SQL
+        // because Supabase's PostgREST query builder has no DISTINCT ON
+        // support, and the rest of this function's filtering (application
+        // status, capacity) is already client-side, so adding one more
+        // reduce step here avoids introducing a bespoke SQL view or RPC
+        // just for this. Since the featured Jalaram row is a normal
+        // opportunities row within this same result set, this single dedup
+        // step also fixes the featured hero card showing multiple times —
+        // there's no separate query for it to duplicate the fix in.
+        const standalone = enrichedData.filter((o) => !o.series_id);
+        const seriesRepresentatives = new Map<string, (typeof enrichedData)[number]>();
+        for (const opp of enrichedData) {
+          if (!opp.series_id) continue;
+          const existing = seriesRepresentatives.get(opp.series_id);
+          const oppTime = opp.starts_at ? new Date(opp.starts_at).getTime() : Infinity;
+          const existingTime = existing?.starts_at ? new Date(existing.starts_at).getTime() : Infinity;
+          if (!existing || oppTime < existingTime) {
+            seriesRepresentatives.set(opp.series_id, opp);
+          }
+        }
+
+        const deduped = [...standalone, ...Array.from(seriesRepresentatives.values())].sort(
+          (a, b) => {
+            const aTime = a.starts_at ? new Date(a.starts_at).getTime() : Infinity;
+            const bTime = b.starts_at ? new Date(b.starts_at).getTime() : Infinity;
+            return aTime - bTime;
+          }
+        );
+
         setUserApplications(applicationsMap);
-        setOpportunities(enrichedData);
+        // Supabase infers to-one joins (charities) as arrays without generated
+        // DB types; at runtime these are single objects (see access sites below).
+        setOpportunities(deduped as unknown as Opportunity[]);
+
+        // Fetch recurrence type for any series these opportunities belong to,
+        // so the "Weekly"/"Daily" badge can be rendered without an extra
+        // round trip per card.
+        const seriesIds = Array.from(
+          new Set(deduped.map((o) => o.series_id).filter((sid): sid is string => !!sid))
+        );
+        if (seriesIds.length > 0) {
+          const { data: seriesData } = await supabase
+            .from("opportunity_series")
+            .select("id, recurrence_type")
+            .in("id", seriesIds);
+
+          setSeriesRecurrence(
+            new Map((seriesData || []).map((s) => [s.id, s.recurrence_type]))
+          );
+        }
       } else {
-        setOpportunities(data || []);
+        setOpportunities((data as unknown as Opportunity[]) || []);
       }
     } catch (err: any) {
       const errorMsg = err?.message || "Failed to fetch opportunities";
@@ -246,6 +313,14 @@ export default function HomeScreen() {
     return { date: dateStr, time: timeStr };
   };
 
+  const formatNextOccurrenceLabel = (isoString: string) =>
+    new Date(isoString).toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      timeZone: "Europe/London",
+    });
+
   const getSpotStatusColor = (
     filled: number,
     total: number,
@@ -256,6 +331,16 @@ export default function HomeScreen() {
     return nearlyFull ? "amber" : "teal";
   };
 
+  const getUrgencyMessage = (volunteersCount: number, target: number) => {
+    if (target === 0) return null;
+    const ratio = Math.min(1, volunteersCount / target);
+    if (volunteersCount === 0) return "Be the first to sign up!";
+    if (ratio < 0.34) return "We need your help — spots are wide open";
+    if (ratio < 0.7) return "Halfway there! Help us reach full capacity";
+    if (ratio < 1) return "Almost full — grab a spot before they run out";
+    return null;
+  };
+
   const renderFeaturedCard = (item: Opportunity) => {
     const { date, time } = formatDateTime(item.starts_at);
     const volunteersCount =
@@ -264,11 +349,14 @@ export default function HomeScreen() {
     // Determine effective cap
     const effectiveCap = item.max_volunteers !== null ? item.max_volunteers : item.target_volunteers;
     const isFull = effectiveCap !== null && volunteersCount >= effectiveCap;
+    const target = item.target_volunteers || 0;
+    const fillRatio = target > 0 ? Math.min(1, volunteersCount / target) : 0;
+    const urgencyMessage = getUrgencyMessage(volunteersCount, target);
 
     return (
       <TouchableOpacity
         key={item.id}
-        onPress={() => router.push(`/opportunity/${item.id}`)}
+        onPress={() => handleCardPress(item)}
         style={{ marginBottom: Spacing.lg }}
       >
         <Card padding="lg" backgroundColor={Colors.cardBg}>
@@ -309,20 +397,85 @@ export default function HomeScreen() {
           <View style={{ height: 1, backgroundColor: Colors.border, marginBottom: Spacing.md }} />
 
           {/* Volunteers signed up */}
-          <Text style={[Typography.body, { color: Colors.textSecondary, marginBottom: Spacing.md }]}>
-            {volunteersCount} {volunteersCount === 1 ? "volunteer" : "volunteers"} signed up
-          </Text>
+          <View style={{ marginBottom: Spacing.md }}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: Spacing.sm,
+              }}
+            >
+              <Text style={[Typography.body, { color: Colors.textSecondary }]}>
+                {volunteersCount} {volunteersCount === 1 ? "volunteer" : "volunteers"} signed up
+                {target > 0 ? ` of ${target}` : ""}
+              </Text>
+              {target > 0 && !isFull && (
+                <Text
+                  style={[
+                    Typography.badge,
+                    { color: fillRatio < 0.34 ? Colors.category.amber.text : Colors.category.teal.text },
+                  ]}
+                >
+                  {Math.round(fillRatio * 100)}%
+                </Text>
+              )}
+            </View>
+
+            {target > 0 && (
+              <View
+                style={{
+                  height: 8,
+                  borderRadius: 4,
+                  backgroundColor: Colors.category.teal.bg,
+                  overflow: "hidden",
+                }}
+              >
+                <View
+                  style={{
+                    height: "100%",
+                    width: `${fillRatio * 100}%`,
+                    borderRadius: 4,
+                    backgroundColor: isFull
+                      ? Colors.category.amber.text
+                      : fillRatio < 0.34
+                      ? Colors.category.amber.text
+                      : Colors.primary,
+                  }}
+                />
+              </View>
+            )}
+
+            {urgencyMessage && (
+              <Text
+                style={[
+                  Typography.meta,
+                  { color: fillRatio < 0.34 ? Colors.category.amber.text : Colors.textSecondary, marginTop: Spacing.sm },
+                ]}
+              >
+                {urgencyMessage}
+              </Text>
+            )}
+          </View>
 
           {/* Full-width button */}
           <Button
-            label={isFull ? "Event is full" : "Count me in"}
-            onPress={() => router.push(`/opportunity/${item.id}`)}
+            label={isFull ? "Event is full" : item.series_id ? "Choose a date" : "Count me in"}
+            onPress={() => handleCardPress(item)}
             variant={isFull ? "ghost" : "primary"}
             disabled={isFull}
           />
         </Card>
       </TouchableOpacity>
     );
+  };
+
+  const handleCardPress = (item: Opportunity) => {
+    if (item.series_id) {
+      setDateSheetSeries({ id: item.series_id, title: item.title });
+    } else {
+      router.push(`/opportunity/${item.id}`);
+    }
   };
 
   const renderOpportunityCard = ({ item }: { item: Opportunity }) => {
@@ -337,17 +490,38 @@ export default function HomeScreen() {
       : "teal";
 
     const { date, time } = formatDateTime(item.starts_at);
+    const recurrenceType = item.series_id ? seriesRecurrence.get(item.series_id) : undefined;
 
     return (
-      <TouchableOpacity onPress={() => router.push(`/opportunity/${item.id}`)}>
+      <TouchableOpacity onPress={() => handleCardPress(item)}>
         <Card padding="md">
-          {/* Category tag */}
-          {item.type && (
-            <View style={{ marginBottom: Spacing.md }}>
-              <Tag
-                label={formatTagLabel(item.type)}
-                color={categoryColor}
-              />
+          {/* Category tag + repeating badge */}
+          {(item.type || recurrenceType) && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm, marginBottom: Spacing.md }}>
+              {item.type && (
+                <Tag
+                  label={formatTagLabel(item.type)}
+                  color={categoryColor}
+                />
+              )}
+              {recurrenceType && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: Spacing.xs,
+                    backgroundColor: Colors.category.teal.bg,
+                    paddingHorizontal: Spacing.sm,
+                    paddingVertical: 4,
+                    borderRadius: BorderRadius.pill,
+                  }}
+                >
+                  <Repeat2 size={12} color={Colors.category.teal.text} strokeWidth={2} />
+                  <Text style={[Typography.badge, { color: Colors.category.teal.text }]}>
+                    {recurrenceType === "weekly" ? "Weekly" : "Daily"}
+                  </Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -361,12 +535,13 @@ export default function HomeScreen() {
             {item.charities?.name || "Unknown Charity"}
           </Text>
 
-          {/* Date and Time */}
+          {/* Date and Time (series cards show "Next: <date>" since this
+              row represents the next upcoming occurrence, not a one-off) */}
           {item.starts_at && (
             <View style={{ flexDirection: "row", gap: Spacing.sm, alignItems: "center", marginBottom: Spacing.md }}>
               <Clock size={14} color={Colors.textTertiary} strokeWidth={1.5} />
               <Text style={[Typography.meta, { color: Colors.textSecondary }]}>
-                {date} at {time}
+                {item.series_id ? `Next: ${formatNextOccurrenceLabel(item.starts_at)}` : `${date} at ${time}`}
               </Text>
             </View>
           )}
@@ -611,6 +786,19 @@ export default function HomeScreen() {
         </View>
       ) : (
         renderEmptyState()
+      )}
+
+      {dateSheetSeries && (
+        <DateSelectionSheet
+          visible={!!dateSheetSeries}
+          seriesId={dateSheetSeries.id}
+          seriesTitle={dateSheetSeries.title}
+          onClose={() => setDateSheetSeries(null)}
+          onSelectOccurrence={(occurrenceId) => {
+            setDateSheetSeries(null);
+            router.push(`/opportunity/${occurrenceId}`);
+          }}
+        />
       )}
     </Screen>
   );

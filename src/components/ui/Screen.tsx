@@ -7,8 +7,14 @@ interface ScreenProps {
   scrollable?: boolean;
   backgroundColor?: string;
   horizontalPadding?: number;
+  padding?: 'md' | 'lg'; // adds matching vertical padding (12px or 16px)
   testID?: string;
 }
+
+const verticalPaddingValues: Record<'md' | 'lg', number> = {
+  md: 12,
+  lg: 16,
+};
 
 /**
  * Screen: pageBg background, screenPaddingHorizontal (20px), safe area wrapper
@@ -18,6 +24,7 @@ export function Screen({
   scrollable = false,
   backgroundColor = Colors.pageBg,
   horizontalPadding = Layout.screenPaddingHorizontal,
+  padding,
   testID,
 }: ScreenProps) {
   const containerStyle: ViewStyle = {
@@ -27,6 +34,7 @@ export function Screen({
 
   const innerStyle: ViewStyle = {
     paddingHorizontal: horizontalPadding,
+    ...(padding ? { paddingVertical: verticalPaddingValues[padding] } : null),
   };
 
   if (scrollable) {
