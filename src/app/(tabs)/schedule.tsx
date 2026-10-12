@@ -170,13 +170,18 @@ export default function ScheduleScreen() {
   const handleWithdraw = async (appId: string) => {
     try {
       await haptics.medium();
-      const { error } = await supabase
+      const { data: updatedRows, error } = await supabase
         .from('applications')
         .update({ status: 'cancelled' })
         .eq('id', appId)
-        .eq('volunteer_id', session?.user.id);
+        .eq('volunteer_id', session?.user.id)
+        .select('id');
 
       if (error) throw error;
+      // Zero rows means nothing was withdrawn (RLS filters silently).
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new Error('No sign-up was updated');
+      }
 
       await haptics.success();
       fetchApplications();
@@ -204,7 +209,12 @@ export default function ScheduleScreen() {
     } catch (err: any) {
       console.error('Error updating application:', err);
       await haptics.warning();
-      Alert.alert('Error', 'Failed to update application');
+      // P0001 is the capacity check in the database (migration 029); its
+      // message is written for the volunteer, e.g. "Only 1 spot left...".
+      Alert.alert(
+        err?.code === 'P0001' ? 'Not enough spots' : 'Error',
+        err?.code === 'P0001' && err?.message ? err.message : 'Failed to update application'
+      );
     }
   };
 

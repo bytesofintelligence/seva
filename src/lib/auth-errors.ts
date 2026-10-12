@@ -25,6 +25,26 @@ export function validatePassword(password: string): PasswordCheck {
   return { ok: true };
 }
 
+/**
+ * The one-time code in a verification or reset email. Supabase's length is a
+ * dashboard setting (6-10 digits), so accept the whole range rather than
+ * hard-coding today's value.
+ */
+export const EMAIL_CODE_MAX_LENGTH = 10;
+const EMAIL_CODE_PATTERN = /^[0-9]{6,10}$/;
+
+/** Keeps only digits, so a pasted "123 456" or "123-456" still works. */
+export function cleanEmailCode(input: string): string {
+  return input.replace(/[^0-9]/g, '').slice(0, EMAIL_CODE_MAX_LENGTH);
+}
+
+export function isValidEmailCode(code: string): boolean {
+  return EMAIL_CODE_PATTERN.test(code);
+}
+
+export const WRONG_EMAIL_CODE_MESSAGE =
+  'That code is not correct or has expired. Check the latest email, or request a new one.';
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 export function isValidEmail(email: string): boolean {

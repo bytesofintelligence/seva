@@ -164,6 +164,23 @@ export default function EditProfileVolunteerScreen() {
         return;
       }
 
+      // Remove the user's photos first. Storage files can only be deleted
+      // through the Storage API, and delete_volunteer_account refuses to run
+      // while any remain (migration 030) -- so a failure here stops the
+      // deletion rather than leaving a photo behind an account that is gone.
+      const userId = session.user.id;
+      const { data: photos, error: listError } = await supabase.storage
+        .from('avatars')
+        .list(userId, { limit: 1000 });
+      if (listError) throw listError;
+
+      if (photos && photos.length > 0) {
+        const { error: removeError } = await supabase.storage
+          .from('avatars')
+          .remove(photos.map((photo) => `${userId}/${photo.name}`));
+        if (removeError) throw removeError;
+      }
+
       // Call the RPC function to delete the account completely
       // This function withdraws all applications, deletes the profile, and deletes the auth user
       const { data, error: rpcError } = await supabase.rpc('delete_volunteer_account');

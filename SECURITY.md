@@ -9,6 +9,44 @@ See `supabase/migrations/001_initial_schema.sql` and `003_status_cleanup.sql`.
 Unchanged by the sponsorship feature, except for two new columns on
 `charities` (see the bank details section below).
 
+## applications (`029_application_integrity.sql`)
+
+RLS (from `001`) decides who may touch a row: the volunteer, or the owner of
+the charity the opportunity belongs to. What they may do to it is enforced by
+`enforce_application_rules_trigger` (`BEFORE INSERT OR UPDATE`), for the same
+reason pledges use a trigger -- a policy cannot compare `OLD` with `NEW`.
+
+- **One row per volunteer per opportunity** (unique index). Re-applying
+  updates the cancelled row.
+- **Initial status is set by the database**, not the client: `confirmed` when
+  the opportunity is `auto_confirm`, otherwise `pending`.
+- **Volunteer**: `pending|confirmed|approved -> cancelled` (withdraw),
+  `cancelled -> pending|confirmed` (re-apply), and may edit party size /
+  answers while the sign-up is live. Can never reach `approved`.
+- **Coordinator**: `pending -> approved|rejected`,
+  `pending|confirmed|approved -> cancelled` (session cancelled),
+  `confirmed|approved -> in_progress|completed`. Status only -- not the
+  volunteer's details.
+- **Capacity** (`COALESCE(max_volunteers, target_volunteers)`) is checked on
+  apply, re-apply, approval and party-size increase, under a row lock on the
+  opportunity so simultaneous sign-ups cannot both take the last place.
+- `service_role` / the SQL editor bypass the trigger, for admin repairs.
+
+The client-side checks in `ApplicationModal.tsx` remain only as a fast first
+answer. Never treat them as the rule.
+
+## avatars bucket (`030_avatar_ownership.sql`)
+
+- **INSERT / UPDATE / DELETE**: only inside your own `<auth.uid()>/` folder.
+- **SELECT**: your own files; any file if you own a charity (coordinators
+  viewing volunteers); and the single file a `charities.avatar_url` points at
+  (logos, visible to everyone signed in).
+- The bucket must stay **private** -- a public bucket ignores these policies.
+- `delete_volunteer_account()` refuses to run while the caller still has files
+  in the bucket; the app removes them first via the Storage API.
+
+Both are covered by `supabase/tests/application_rules_test.sh`.
+
 ## sponsorship_items (`018_sponsorships.sql`)
 
 - **SELECT**: any authenticated user, as long as `status != 'closed'` — OR the

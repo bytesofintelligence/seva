@@ -78,6 +78,36 @@ function collectParams(source: string | undefined, into: Record<string, string>)
  * Never log the return value of this function — it holds live credentials.
  */
 export function parseAuthLink(url: string): ParsedAuthLink {
+  return fromParams(urlParams(url));
+}
+
+/**
+ * The same, for the callback screen: what the router says we were opened with,
+ * topped up from the raw URL.
+ *
+ * The route's own search params are the reliable source. expo-router has
+ * already parsed the link by the time the screen mounts, whether the app was
+ * launched by it or was already running. The raw URL is only needed for
+ * implicit-flow links, whose tokens travel in the `#fragment` and so never
+ * reach the router's params; anything the route did provide wins over it,
+ * because the last URL the OS handed us can be an older, already-used link.
+ */
+export function resolveAuthLink(
+  url: string | null,
+  routeParams: Record<string, string | string[] | undefined>,
+): ParsedAuthLink {
+  const params: Record<string, string> =
+    url && url.includes(AUTH_CALLBACK_PATH.slice(1)) ? urlParams(url) : {};
+
+  for (const [key, value] of Object.entries(routeParams)) {
+    const single = Array.isArray(value) ? value[0] : value;
+    if (single) params[key] = single;
+  }
+
+  return fromParams(params);
+}
+
+function urlParams(url: string): Record<string, string> {
   const params: Record<string, string> = {};
 
   const hashIndex = url.indexOf('#');
@@ -90,6 +120,10 @@ export function parseAuthLink(url: string): ParsedAuthLink {
   collectParams(query, params);
   collectParams(fragment, params);
 
+  return params;
+}
+
+function fromParams(params: Record<string, string>): ParsedAuthLink {
   const parsed: ParsedAuthLink = {
     code: params.code || undefined,
     tokenHash: params.token_hash || params.token || undefined,

@@ -155,13 +155,20 @@ function ApplicationsScreen() {
 
       // ASYNC: Update application status in background
       // (spots_filled is computed from application statuses via the view, not stored)
-      const { error: updateError } = await supabase
+      const { data: updatedRows, error: updateError } = await supabase
         .from('applications')
         .update({ status: newStatus })
-        .eq('id', appId);
+        .eq('id', appId)
+        .select('id');
 
       if (updateError) {
         throw updateError;
+      }
+
+      // An update that RLS filters out is not an error, just zero rows --
+      // without this check it would be reported as a success.
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new Error('This application could not be updated. Please refresh and try again.');
       }
 
       // Success feedback

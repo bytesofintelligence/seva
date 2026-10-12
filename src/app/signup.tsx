@@ -239,6 +239,9 @@ export default function SignupScreen() {
                   }}
                 >
                   Please enter your details as the coordinator managing this charity account.
+                  {'\n\n'}
+                  Coordinator access is approved by the SEVA team. Until then your account
+                  works as a volunteer account.
                 </ThemedText>
               )}
 

@@ -53,6 +53,16 @@ interface AuthContextType {
   refreshUser: () => Promise<boolean>;
   resendVerification: (email: string) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
+  /**
+   * Completes signup confirmation or password recovery with the code from the
+   * email instead of its link. Unlike the link, the code is not tied to the
+   * device that requested it, so the email can be read anywhere.
+   */
+  verifyEmailCode: (
+    email: string,
+    code: string,
+    purpose: "signup" | "recovery",
+  ) => Promise<void>;
   /** Sets a new password for the current (recovery or normal) session. */
   updatePassword: (newPassword: string) => Promise<void>;
   /** Verifies the current password server-side, then sets the new one. */
@@ -263,6 +273,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
   }, []);
 
+  const verifyEmailCode = useCallback(
+    async (email: string, code: string, purpose: "signup" | "recovery") => {
+      // Supabase checks the code against the same one-time token the emailed
+      // link carries, and returns a session directly: no PKCE verifier is
+      // involved, which is what makes this work from any device. The type is
+      // explicit so a signup code can only confirm a signup and a recovery
+      // code can only start a recovery (which emits PASSWORD_RECOVERY, pinning
+      // the session to the reset screen exactly as the link does).
+      const { error } = await supabase.auth.verifyOtp({
+        email: normaliseEmail(email),
+        token: code.trim(),
+        type: purpose === "recovery" ? "recovery" : "signup",
+      });
+      if (error) throw error;
+    },
+    [],
+  );
+
   const updatePassword = useCallback(async (newPassword: string) => {
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) throw error;
@@ -329,6 +357,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         refreshUser,
         resendVerification,
         sendPasswordReset,
+        verifyEmailCode,
         updatePassword,
         changePassword,
         beginPasswordRecovery,

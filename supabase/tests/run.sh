@@ -40,12 +40,10 @@ migrations=("$REPO"/supabase/migrations/*.sql)
 IFS=$'\n' migrations=($(printf '%s\n' "${migrations[@]}" | sort)); unset IFS
 for f in "${migrations[@]}"; do
   base="$(basename "$f")"
-  # These need Supabase-only objects (storage schema, realtime publication)
-  # that this harness does not recreate. 008 has a stray character and is a
-  # no-op anyway (profiles.phone already exists from 001) — see the notes in
-  # the auth audit.
+  # 020 needs the realtime publication, which this harness does not recreate.
+  # 008 has a stray character and is a no-op anyway (profiles.phone already
+  # exists from 001) — see the notes in the auth audit.
   case "$base" in
-    004_profile_details_part_b.sql|006_fix_storage_policies.sql|\
     008_add_phone_to_profiles.sql|020_enable_sponsorship_realtime.sql)
       echo "    SKIP $base"; continue;;
   esac
@@ -64,4 +62,12 @@ echo "==> Seeding users"
 "${P[@]}" -q -c "insert into opportunities (id, charity_id, title) values ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Sorting shift');" >/dev/null
 
 echo
-CLAUDE_JOB_DIR="" PGDIR="$PGDIR" bash "$HERE/authz_test.sh"
+status=0
+CLAUDE_JOB_DIR="" PGDIR="$PGDIR" bash "$HERE/authz_test.sh" || status=1
+
+# Runs second: it seeds its own users and sessions, so it does not depend on
+# (or disturb) the fixtures authz_test.sh asserts against.
+echo
+CLAUDE_JOB_DIR="" PGDIR="$PGDIR" bash "$HERE/application_rules_test.sh" || status=1
+
+exit $status

@@ -49,7 +49,7 @@ function RootLayout() {
       try {
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
-          .select('created_at')
+          .select('profile_completed')
           .eq('id', userId)
           .single();
 
@@ -63,12 +63,12 @@ function RootLayout() {
           return;
         }
 
-        if (profile?.created_at) {
-          const isNewAccount = Date.now() - new Date(profile.created_at).getTime() < 60000;
-          if (isNewAccount) {
-            router.replace(onboardingRoute);
-            return;
-          }
+        // Onboarding is owed until the profile says it is done (saving or
+        // skipping it both set the flag). Account age is no guide: with email
+        // confirmation on, nobody reaches this point within seconds of signup.
+        if (!profile?.profile_completed) {
+          router.replace(onboardingRoute);
+          return;
         }
 
         if (userRole === 'charity') {

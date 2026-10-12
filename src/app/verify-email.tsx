@@ -6,7 +6,15 @@ import { AuthMessage, AuthScreenShell } from '@/components/auth/AuthScreenShell'
 import { Button, Input } from '@/components/ui';
 import { ThemedText } from '@/components/themed-text';
 import { useAuth } from '@/context/auth-context';
-import { isValidEmail, logAuthError, toFriendlyAuthError } from '@/lib/auth-errors';
+import {
+  EMAIL_CODE_MAX_LENGTH,
+  WRONG_EMAIL_CODE_MESSAGE,
+  cleanEmailCode,
+  isValidEmail,
+  isValidEmailCode,
+  logAuthError,
+  toFriendlyAuthError,
+} from '@/lib/auth-errors';
 import { Colors, Spacing } from '@/constants/design-tokens';
 import { haptics } from '@/lib/haptics';
 
@@ -23,7 +31,8 @@ const RESEND_COOLDOWN_SECONDS = 60;
 export default function VerifyEmailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ email?: string }>();
-  const { user, emailVerified, resendVerification, refreshUser, signOut } = useAuth();
+  const { user, emailVerified, resendVerification, refreshUser, signOut, verifyEmailCode } =
+    useAuth();
 
   // Prefer the session's address; fall back to what signup/login handed over,
   // and only fall back to a typed value when we have neither.
@@ -33,6 +42,8 @@ export default function VerifyEmailScreen() {
   const setEmail = setTypedEmail;
   const [sending, setSending] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [code, setCode] = useState('');
+  const [verifyingCode, setVerifyingCode] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -98,8 +109,57 @@ export default function VerifyEmailScreen() {
     }
   };
 
+  const handleVerifyCode = async () => {
+    if (verifyingCode) return;
+
+    const target = email.trim();
+    if (!isValidEmail(target)) {
+      setNotice('');
+      setError('Please enter a valid email address');
+      await haptics.warning();
+      return;
+    }
+    if (!isValidEmailCode(code)) {
+      setNotice('');
+      setError('Enter the code from your verification email');
+      await haptics.warning();
+      return;
+    }
+
+    setVerifyingCode(true);
+    setError('');
+    setNotice('');
+    try {
+      // Success signs the user in with a confirmed email; the effect above and
+      // the root layout take it from there.
+      await verifyEmailCode(target, code, 'signup');
+      await haptics.success();
+    } catch (err) {
+      logAuthError('verify-email-code', err);
+      const friendly = toFriendlyAuthError(err);
+      setError(
+        friendly.kind === 'network' || friendly.kind === 'rate_limited'
+          ? friendly.message
+          : WRONG_EMAIL_CODE_MESSAGE,
+      );
+      await haptics.warning();
+    } finally {
+      setVerifyingCode(false);
+    }
+  };
+
   const handleCheck = async () => {
     if (checking) return;
+
+    // With "Confirm email" on there is no session until the address is
+    // confirmed, so there is nothing here to refresh. If they confirmed by
+    // opening the link somewhere else, logging in is the next step -- and if
+    // they have not, the login screen sends them straight back here.
+    if (!user) {
+      router.replace({ pathname: '/login', params: { email: email.trim() } });
+      return;
+    }
+
     setChecking(true);
     setError('');
     setNotice('');
@@ -124,15 +184,15 @@ export default function VerifyEmailScreen() {
     router.replace('/login');
   };
 
-  const busy = sending || checking;
+  const busy = sending || checking || verifyingCode;
 
   return (
     <AuthScreenShell
       title="Check your email"
       subtitle={
         knownEmail
-          ? `We sent a verification link to ${knownEmail}. Open it on this device to finish setting up your account.`
-          : 'We sent you a verification link. Open it on this device to finish setting up your account.'
+          ? `We sent a verification email to ${knownEmail}. Tap the link on this phone, or enter the code from the email below.`
+          : 'We sent you a verification email. Tap the link on this phone, or enter the code from the email below.'
       }
     >
       {error ? <AuthMessage tone="error">{error}</AuthMessage> : null}
@@ -151,12 +211,31 @@ export default function VerifyEmailScreen() {
         />
       ) : null}
 
+      <Input
+        label="Verification code"
+        placeholder="Code from the email"
+        value={code}
+        onChangeText={(text) => setCode(cleanEmailCode(text))}
+        keyboardType="number-pad"
+        autoComplete="one-time-code"
+        textContentType="oneTimeCode"
+        maxLength={EMAIL_CODE_MAX_LENGTH}
+        editable={!busy}
+      />
+
       <View style={{ gap: Spacing.sm, marginTop: Spacing.sm }}>
         <Button
-          label={checking ? 'Checking…' : "I've verified — continue"}
-          onPress={handleCheck}
+          label={verifyingCode ? 'Confirming…' : 'Confirm with code'}
+          onPress={handleVerifyCode}
           disabled={busy}
           variant="primary"
+          size="lg"
+        />
+        <Button
+          label={checking ? 'Checking…' : "I've used the link — continue"}
+          onPress={handleCheck}
+          disabled={busy}
+          variant="ghost"
           size="lg"
         />
         <Button
@@ -190,8 +269,8 @@ export default function VerifyEmailScreen() {
           textAlign: 'center',
         }}
       >
-        Can&apos;t find it? Check your spam folder. Links expire, so request a
-        fresh one if it&apos;s been a while.
+        Can&apos;t find it? Check your spam folder. Links and codes expire, so
+        request a fresh email if it&apos;s been a while.
       </ThemedText>
     </AuthScreenShell>
   );

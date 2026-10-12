@@ -203,26 +203,33 @@ export function ApplicationModal({
       // Determine status based on signup_mode
       const applicationStatus: ApplicationStatus = signup_mode === 'auto_confirm' ? 'confirmed' : 'pending';
 
+      // The database has the final say on both status and capacity (migration
+      // 029): the checks above are a fast first answer, not the authority. So
+      // read back the status it actually stored rather than assuming ours.
+      let savedRows: { status: string }[] | null = null;
+
       // If they're re-applying after withdrawal, update the cancelled application
       // Otherwise, insert a new application
       if (existingAppId) {
         // Re-applying after withdrawal - update the cancelled application
-        const { error: updateError } = await supabase
+        const { data, error: updateError } = await supabase
           .from('applications')
           .update({
             additional_info: requiresAdditionalInfo ? additionalInfo.trim() : null,
             party_size: partySize,
             status: applicationStatus,
           })
-          .eq('id', existingAppId);
+          .eq('id', existingAppId)
+          .select('status');
 
         if (updateError) {
           throw updateError;
         }
+        savedRows = data;
       } else {
         // New application - insert into database
         // RLS policy ensures volunteer_id = auth.uid()
-        const { error: insertError } = await supabase
+        const { data, error: insertError } = await supabase
           .from('applications')
           .insert({
             volunteer_id: session.user.id,
@@ -230,14 +237,21 @@ export function ApplicationModal({
             additional_info: requiresAdditionalInfo ? additionalInfo.trim() : null,
             party_size: partySize,
             status: applicationStatus,
-          });
+          })
+          .select('status');
 
         if (insertError) {
           throw insertError;
         }
+        savedRows = data;
       }
 
-      setApplicationStatus(applicationStatus);
+      // An update that RLS filters out is not an error, just zero rows.
+      if (!savedRows || savedRows.length === 0) {
+        throw new Error('Your sign-up could not be saved. Please try again.');
+      }
+
+      setApplicationStatus(savedRows[0].status as ApplicationStatus);
       setState('success');
       await haptics.success();
 
@@ -248,7 +262,12 @@ export function ApplicationModal({
       }, 2000);
     } catch (err: any) {
       console.error('Error submitting application:', err);
-      setError(err?.message || 'Failed to submit application');
+      // 23505 = the one-sign-up-per-opportunity unique index (a double submit).
+      setError(
+        err?.code === '23505'
+          ? "You've already signed up for this opportunity."
+          : err?.message || 'Failed to submit application'
+      );
       setState('error');
     }
   };

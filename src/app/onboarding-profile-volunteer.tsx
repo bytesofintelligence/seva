@@ -73,8 +73,14 @@ export default function OnboardingProfileVolunteerScreen() {
 
   const handleSkip = async () => {
     await haptics.light();
-    // Navigate to main app without saving
-    // The profile already exists from the trigger, so this is valid
+    // Mark onboarding as done so the root layout doesn't send them back here
+    // on every launch (same as the charity onboarding's skip).
+    const { error: skipError } = await supabase
+      .from('profiles')
+      .update({ profile_completed: true })
+      .eq('id', session?.user.id);
+    if (skipError) console.error('Error marking profile completed:', skipError);
+
     router.replace('/(tabs)');
   };
 

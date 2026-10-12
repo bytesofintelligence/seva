@@ -53,6 +53,21 @@ exp://127.0.0.1:8081/--/auth/callback
 exp://<YOUR-LAN-IP>:8081/--/auth/callback
 ```
 
+### If an email link opens a blank white page
+
+The browser followed Supabase's redirect to `seva:///auth/callback` and nothing
+on the device handles the `seva://` scheme. That scheme only exists once a
+SEVA build (development, preview or production) is installed — Expo Go does
+not register it, and neither does a laptop browser.
+
+It also happens in Expo Go even with the `exp://` entries missing from the
+allow-list: Supabase rejects the `exp://` redirect the app asked for and falls
+back to the Site URL, which is `seva:///auth/callback` — the same dead end.
+
+Links are PKCE: they complete only in the app install that requested them.
+Opened anywhere else, a signup link still confirms the email (the user can
+then log in normally), but a reset link has to be requested again.
+
 ---
 
 ## 2. Authentication → Providers → Email
@@ -73,18 +88,63 @@ gate is inert. Turn it on.
 
 ## 3. Authentication → Email Templates
 
-**Leave the default `{{ .ConfirmationURL }}` in both "Confirm signup" and
-"Reset password".** Do not replace it with a raw `seva://` link: most mail
-clients (Gmail, Outlook) will not turn a non-HTTP scheme into a clickable link,
-so the email would arrive with a dead URL.
+Each email must carry **both** a link and a code:
 
-`{{ .ConfirmationURL }}` produces an `https://<project>.supabase.co/auth/v1/verify?...`
-link — clickable everywhere — which 302-redirects to your `seva://` callback,
-and the OS hands that to the app.
+- `{{ .ConfirmationURL }}` — the link. It only completes in the app install
+  that requested it (PKCE), so it is for people reading the email on the phone
+  that has SEVA.
+- `{{ .Token }}` — the one-time code. Typed into SEVA, it works no matter where
+  the email was read. The app's "Check your email" screens ask for it, so **if
+  a template has no `{{ .Token }}`, that screen is asking for a code the user
+  was never sent.**
 
-The callback route also accepts `token_hash` and implicit fragment tokens, so if
-you later customise the templates to use `{{ .TokenHash }}` the app will still
-work without a code change.
+Do not replace `{{ .ConfirmationURL }}` with a raw `seva://` link: most mail
+clients (Gmail, Outlook) will not make a non-HTTP scheme clickable.
+
+**Confirm signup**
+
+```html
+<h2>Confirm your email for SEVA</h2>
+<p>On the phone where you installed SEVA, tap:</p>
+<p><a href="{{ .ConfirmationURL }}">Confirm my email</a></p>
+<p>Reading this somewhere else? Open SEVA and enter this code:</p>
+<p style="font-size:24px;letter-spacing:3px"><strong>{{ .Token }}</strong></p>
+<p>If you did not create a SEVA account, you can ignore this email.</p>
+```
+
+**Reset password**
+
+```html
+<h2>Reset your SEVA password</h2>
+<p>On the phone where you installed SEVA, tap:</p>
+<p><a href="{{ .ConfirmationURL }}">Set a new password</a></p>
+<p>Reading this somewhere else? Open SEVA, choose "Forgot password?" and enter this code:</p>
+<p style="font-size:24px;letter-spacing:3px"><strong>{{ .Token }}</strong></p>
+<p>If you did not ask for this, ignore this email. Your password has not changed. Never share this code.</p>
+```
+
+The link and the code are the same one-time token in two forms: using either
+one spends both, and requesting a new email cancels the previous one.
+
+### Code settings (Authentication → Providers → Email)
+
+| Setting | Recommended | Why |
+|---|---|---|
+| **Email OTP Length** | `8` | A typed code is a shorter secret than a link. Eight digits makes guessing 100x harder than six for two extra keystrokes. The app accepts 6-10, so this can change without a release. |
+| **Email OTP Expiration** | `3600` or less | Applies to links and codes alike. |
+
+Wrong guesses are limited by Authentication → Rate Limits → "token
+verifications" (30 per 5 minutes per IP by default). Leave it at or below that.
+
+### If reset codes are always "incorrect or expired" for one person
+
+Some mail systems open every link in an email to scan it. That spends the
+token before the person sees it. For signup this is harmless (the address is
+confirmed; they just log in). For password reset it is not — if it happens,
+remove the link from the Reset password template so the email is code-only.
+
+The callback route also accepts `token_hash` and implicit fragment tokens, so
+a template that uses `{{ .TokenHash }}` still works without a code change.
 
 ---
 
@@ -111,12 +171,20 @@ development build or a production build.
 
 ```bash
 # one-time
-npx expo install expo-dev-client
-npx eas build --profile development --platform ios     # or android
+eas init                                               # links the EAS project
+eas build --profile development --platform android
+# then, each session
+npx expo start --dev-client
 ```
 
-`app.json` needs `ios.bundleIdentifier` and `android.package` set before EAS
-will build. Neither is currently present.
+`expo-dev-client` is installed, `eas.json` defines the `development`,
+`preview` and `production` profiles, and `android.package` is
+`com.bytesofintelligence.seva`. iOS is not configured (`ios.bundleIdentifier`
+is still unset).
+
+A development build loads its JavaScript from your machine, so it picks up
+`.env` locally. `preview` and `production` builds are bundled on EAS, where
+`.env` does not exist — see §6.
 
 ---
 

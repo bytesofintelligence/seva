@@ -23,26 +23,40 @@ const memoryStorage = {
   removeItem: async (key: string) => memoryStorage.data.delete(key),
 };
 
+// Falling back to memory keeps the app usable, but it means the session (and
+// the PKCE verifier an emailed link needs) is lost when the app is closed.
+// Say so in development, so a broken native storage module is noticed on the
+// first test build instead of showing up later as "I keep getting logged out".
+let warnedStorageFallback = false;
+const warnStorageFallback = (err: unknown) => {
+  if (!__DEV__ || warnedStorageFallback) return;
+  warnedStorageFallback = true;
+  console.warn('[auth] AsyncStorage unavailable; sessions will NOT persist across restarts.', err);
+};
+
 const createStorage = () => {
   return {
     getItem: async (key: string) => {
       try {
         return await AsyncStorage.getItem(key);
-      } catch {
+      } catch (err) {
+        warnStorageFallback(err);
         return await memoryStorage.getItem(key);
       }
     },
     setItem: async (key: string, value: string) => {
       try {
         await AsyncStorage.setItem(key, value);
-      } catch {
+      } catch (err) {
+        warnStorageFallback(err);
         await memoryStorage.setItem(key, value);
       }
     },
     removeItem: async (key: string) => {
       try {
         await AsyncStorage.removeItem(key);
-      } catch {
+      } catch (err) {
+        warnStorageFallback(err);
         await memoryStorage.removeItem(key);
       }
     },
